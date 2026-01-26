@@ -7,11 +7,12 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from io import BytesIO
 import re
 import random
+import zipfile # ★ 압축 기능을 위한 모듈 추가
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v3.4", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v3.4 Tab View)")
-st.markdown("### 🌊 4~8장 자동 생성 + 탭(Tab) 뷰어 (안정성 강화)")
+st.set_page_config(page_title="One-Click News v3.5", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v3.5 Bulk Download)")
+st.markdown("### 🌊 4~8장 자동 생성 + 💾 전체 다운로드 기능 탑재")
 
 # --- 폰트 준비 ---
 @st.cache_resource
@@ -51,7 +52,7 @@ def advanced_scrape(url):
         except: pass
     return title, text, top_image
 
-# --- 이미지 라이브러리 (백업용) ---
+# --- 이미지 라이브러리 ---
 def get_fallback_image(keyword):
     keyword = keyword.lower().strip()
     library = {
@@ -190,13 +191,16 @@ if st.button("🚀 카드뉴스 제작 시작"):
         base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         bg_final = base_img
 
-    # --- 렌더링 루프 (탭 뷰 방식 적용) ---
+    # --- 렌더링 루프 ---
     fonts = get_fonts()
     if not fonts: st.error("폰트 로딩 실패"); st.stop()
     
     st.markdown(f"### 📸 총 {len(slides)}장의 카드뉴스가 생성되었습니다.")
+
+    # [저장용 리스트]
+    generated_images = []
     
-    # [핵심 변경] st.columns -> st.tabs (안정성 확보)
+    # 탭 생성
     tab_names = [f"{i+1}면" for i in range(len(slides))]
     tabs = st.tabs(tab_names)
     
@@ -246,6 +250,26 @@ if st.button("🚀 카드뉴스 제작 시작"):
             draw.line((440, 420, 640, 420), fill="white", width=3)
             draw.line((440, 650, 640, 650), fill="white", width=3)
 
-        # 탭 안에 이미지 출력
+        # 리스트에 저장
+        generated_images.append(img)
+        
+        # 탭에 표시
         with tabs[i]:
             st.image(img, caption=f"Page {i+1}")
+
+    # --- [전체 다운로드 버튼 생성] ---
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        for i, img in enumerate(generated_images):
+            img_byte_arr = BytesIO()
+            img.save(img_byte_arr, format='PNG')
+            # 파일명: card_01.png, card_02.png ...
+            zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
+            
+    st.download_button(
+        label="💾 카드뉴스 전체 다운로드 (.zip)",
+        data=zip_buffer.getvalue(),
+        file_name="segye_cardnews.zip",
+        mime="application/zip",
+        use_container_width=True
+    )
