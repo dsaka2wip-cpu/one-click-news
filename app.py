@@ -14,7 +14,7 @@ import fitz  # PyMuPDF
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v12.3", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v12.4", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 설정 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -24,11 +24,10 @@ LOGO_TEXT_PATH = "segye_text.png"
 # [3] 함수 정의 구역
 # ==============================================================================
 
-# 3-1. 스크래핑 및 이미지 필터링 (핵심 수정)
+# 3-1. 스크래핑 (품질 필터링 포함)
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
     raw_images = []
-    
     try:
         config = Config()
         config.browser_user_agent = 'Mozilla/5.0'
@@ -36,46 +35,30 @@ def advanced_scrape(url):
         article = Article(url, config=config)
         article.download()
         article.parse()
-        
-        title = article.title
-        text = article.text
-        top_image = article.top_image
+        title, text, top_image = article.title, article.text, article.top_image
         raw_images = list(article.images)
     except: pass
     
-    # 2차 시도 (BeautifulSoup)
     if len(text) < 50:
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
             resp = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(resp.text, 'html.parser')
             if not title: title = soup.find('title').text.strip()
-            if not top_image:
-                meta = soup.find('meta', property='og:image')
-                if meta: top_image = meta['content']
+            meta = soup.find('meta', property='og:image')
+            if meta: top_image = meta['content']
             text = soup.get_text(separator=' ', strip=True)[:5000]
             for img in soup.find_all('img'):
                 src = img.get('src')
                 if src and src.startswith('http'): raw_images.append(src)
         except: pass
     
-    # [NEW] 이미지 품질 검증 (Quality Gate)
     valid_images = []
-    
-    # 1순위: 탑 이미지는 무조건 확보
-    if top_image: 
-        valid_images.append(top_image)
-        
-    # 2순위: 본문 이미지 중 '크기'가 큰 것만 선별
+    if top_image: valid_images.append(top_image)
     for img_url in raw_images:
-        if img_url == top_image: continue # 중복 제외
-        if 'icon' in img_url or 'logo' in img_url or 'banner' in img_url: continue # 명백한 아이콘 제외
-        
-        try:
-            # 헤더만 받아와서 사이즈 체크 (속도 최적화)
-            # (실제 다운로드는 나중에 하겠지만 여기서는 간단히 필터링)
-            valid_images.append(img_url) 
-        except: continue
+        if img_url == top_image: continue
+        if 'icon' in img_url or 'logo' in img_url or 'banner' in img_url: continue
+        valid_images.append(img_url)
 
     return title, text, valid_images
 
@@ -170,15 +153,13 @@ def create_smooth_gradient(width, height):
             draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     return overlay
 
-# [수정] 텍스트 외곽선(Stroke) 추가로 가독성 확보
 def draw_text_with_stroke(draw, position, text, font, fill="white", stroke_fill="black", stroke_width=2):
     draw.text(position, text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
 def wrap_text(text, font, max_width, draw):
     lines = []
     text = clean_text_spacing(text)
-    if not text: return ["(내용 없음)"] # [수정] 빈 텍스트 방지
-    
+    if not text: return ["(내용 없음)"]
     for paragraph in text.split('\n'):
         if not paragraph.strip(): continue
         words = paragraph.split(' ')
@@ -246,21 +227,48 @@ with st.sidebar:
         st.warning("⚠️ 로고 파일이 없습니다.")
 
 # ==============================================================================
-# [5] 메인 UI
+# [5] 메인 UI (순서: URL -> 버튼 -> 안내)
 # ==============================================================================
-st.title("📰 One-Click News (v12.3 Filter & Contrast)")
+st.title("📰 One-Click News (v12.4 Layout & UX Fix)")
 
+# 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세", expanded=False):
+# 2. 실행 버튼 (위로 이동)
+run_button = st.button("🚀 카드뉴스 제작")
+
+# 3. 안내문 (항상 펼침 + 최신 내용 반영)
+with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세", expanded=True):
     st.markdown("""
-    (생략: 기능 설명은 동일함)
+    이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI 기술**이 결합된 지능형 제작 도구입니다.
+    
+    ### 🧠 1. Intelligence (맥락 인식 기획)
+    * **내러티브 구조화:** 기사를 기계적으로 줄이지 않고, **'Hook(유입) - Content(전개) - Conclusion(결론)'**의 8단 구성으로 재창조합니다.
+    * **데이터 감지 (Big Number):** 기사 내 핵심 수치(%, 금액 등)가 감지되면, 이를 자동으로 포착하여 **인포그래픽(Data Visualization)** 슬라이드로 변환합니다.
+    * **모델 자동 우회 (Auto-Pilot):** 구글의 최신 AI 모델(Gemini 1.5 Flash)을 우선 사용하되, 연결이 불안정할 경우 자동으로 예비 모델로 전환하여 **실패 없는 제작**을 보장합니다.
+
+    ### 🎨 2. Design Engine (유동적 디자인)
+    * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 포맷을 즉시 전환하여 생성합니다.
+    * **지능형 컬러 피킹 (Auto Color):** 업로드된 보도사진의 **지배적인 색상(Dominant Color)**을 AI가 분석·추출하여, 사진과 가장 잘 어울리는 테마 컬러를 자동 적용합니다.
+    * **레이아웃 변주 시스템:** 텍스트 분량과 성격에 따라 **[박스형 / 바형 / 인용구형 / 빅넘버형]** 4가지 디자인을 유기적으로 섞어 지루함을 없앴습니다.
+
+    ### 🛡️ 3. Core Tech (안정성 & 디테일)
+    * **자동 자산 로드:** 로고 파일을 매번 올릴 필요 없이, 서버에 저장된 고화질 로고를 자동으로 불러옵니다.
+    * **타이포그래피 교정:** `3 . 1절`과 같은 어색한 띄어쓰기나 문장 부호 오류를 **정규표현식(Regex)** 엔진이 자동으로 교정합니다.
+    * **하이브리드 로고 시스템:** 심볼과 텍스트 로고를 분리하여 인식하고, 배경의 밝기에 따라 최적의 위치에 배치합니다.
+
+    ### 📸 4. Visual Context & SEO (New)
+    * **멀티 이미지 스크래핑:** 썸네일뿐만 아니라 **기사 본문의 모든 사진을 수집**하여, 슬라이드마다 서로 다른 배경을 배치해 시각적 풍부함을 더합니다.
+    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 **밝기를 자동으로 조절(Dimming)**하고 텍스트 외곽선(Stroke)을 강화했습니다.
+    * **Visual SEO (해시태그):** 인스타그램 등 소셜 미디어 유입을 극대화하기 위해, 기사 내용에 최적화된 **추천 해시태그**를 자동 생성합니다.
     """)
+
+st.markdown("---")
 
 # ==============================================================================
 # [6] 메인 실행 로직
 # ==============================================================================
-if st.button("🚀 카드뉴스 제작"):
+if run_button:
     if not api_key: st.error("API Key 필요"); st.stop()
     if not url: st.error("URL 필요"); st.stop()
     
@@ -335,7 +343,7 @@ if st.button("🚀 카드뉴스 제작"):
                 except: hashtags = line
             elif "[SLIDE" in clean_line:
                 if current_slide: slides.append(current_slide)
-                current_slide = {"HEAD": "제목 없음", "DESC": "내용이 생성되지 않았습니다.", "TYPE": "CONTENT"}
+                current_slide = {"HEAD": "제목 없음", "DESC": "내용 없음", "TYPE": "CONTENT"}
             elif "TYPE:" in clean_line:
                 current_slide["TYPE"] = clean_line.split(":", 1)[1].strip()
             elif "HEAD:" in clean_line:
@@ -366,24 +374,20 @@ if st.button("🚀 카드뉴스 제작"):
         img_symbol = load_local_image(LOGO_SYMBOL_PATH, 60)
         img_logotxt = load_local_image(LOGO_TEXT_PATH, 160)
         
-        # [NEW] 이미지 풀 구성 (품질 검사 적용)
         final_images_pool = []
-        
         if user_image:
             img_bytes = user_image.getvalue()
             final_images_pool.append(Image.open(io.BytesIO(img_bytes)).convert('RGB'))
         else:
-            # 스크래핑된 이미지 중 300px 이상인 것만 다운로드
             for img_link in scraped_images:
                 try:
                     resp = requests.get(img_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2)
                     im = Image.open(io.BytesIO(resp.content)).convert('RGB')
-                    if im.width >= 300 and im.height >= 300: # [핵심] 품질 검문소
+                    if im.width >= 300 and im.height >= 300:
                         final_images_pool.append(im)
-                    if len(final_images_pool) >= 5: break # 최대 5장만
+                    if len(final_images_pool) >= 5: break
                 except: continue
         
-        # 쓸만한 이미지가 없으면 기본 배경
         if not final_images_pool:
             final_images_pool.append(Image.new('RGB', (1080, 1080), color='#333333'))
 
@@ -405,22 +409,18 @@ if st.button("🚀 카드뉴스 제작"):
             if sType == 'OUTRO':
                 img = bg_outro.copy()
             else:
-                # 이미지가 부족하면 첫 번째(썸네일) 이미지를 계속 사용 (이상한 사진 방지)
                 if len(final_images_pool) > 1:
                     pool_idx = i % len(final_images_pool)
                 else:
                     pool_idx = 0
-                    
+                
                 base_img = final_images_pool[pool_idx].copy().resize((CANVAS_W, CANVAS_H))
                 
-                # [수정] 가독성을 위한 명암비 극대화
                 if sType == 'COVER':
-                    # 커버는 70% 밝기 + 그라데이션
                     img = ImageEnhance.Brightness(base_img).enhance(0.7)
                     grad = create_smooth_gradient(CANVAS_W, CANVAS_H)
                     img.paste(grad, (0,0), grad)
                 else:
-                    # 본문은 30% 밝기 (아주 어둡게) + 블러
                     img = base_img.filter(ImageFilter.GaussianBlur(20))
                     img = ImageEnhance.Brightness(img).enhance(0.3)
 
@@ -434,22 +434,40 @@ if st.button("🚀 카드뉴스 제작"):
                     draw_text_with_stroke(draw, (60, top_margin), "SEGYE BRIEFING", font_small, fill=color_main)
                 draw_text_with_stroke(draw, (CANVAS_W-130, top_margin), f"{i+1} / {len(slides)}", font_small)
 
-            # [텍스트 그리기] (Shadow -> Stroke로 변경하여 가독성 강화)
+            # [핵심 수정] 좌표 계산 로직 개선 (텍스트 오버플로우 방지)
             if sType == 'COVER':
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
+                
+                # 본문 높이 계산
                 d_lines = wrap_text(desc, font_body, CANVAS_W-100, draw)
-                current_y = CANVAS_H - 150 - (len(d_lines) * 60)
-                for line in d_lines:
-                    draw_text_with_stroke(draw, (60, current_y), line, font_body, fill="#eeeeee", stroke_width=2)
-                    current_y += 60
-                current_y -= (len(d_lines)*60 + 40)
-                draw.rectangle([(60, current_y), (160, current_y+10)], fill=color_main)
+                desc_h = len(d_lines) * 60
+                
+                # 제목 높이 계산
                 h_lines = wrap_text(head, font_title, CANVAS_W-100, draw)
-                current_y -= (len(h_lines) * 110 + 20)
+                head_h = len(h_lines) * 110
+                
+                # 전체 텍스트 높이
+                total_text_h = desc_h + head_h + 100 # 여백 포함
+                
+                # 시작점 계산 (바닥에서 올라오되, 천장을 뚫으면 천장에 고정)
+                calculated_y = CANVAS_H - 150 - desc_h - 40 - head_h
+                if calculated_y < 150: # 로고 영역 침범 시
+                    calculated_y = 150 # 강제 고정
+                
+                # 그리기 시작 (제목부터)
+                curr_y = calculated_y
                 for line in h_lines:
-                    draw_text_with_stroke(draw, (60, current_y), line, font_title, fill="white", stroke_width=3)
-                    current_y += 110
+                    draw_text_with_stroke(draw, (60, curr_y), line, font_title, fill="white", stroke_width=3)
+                    curr_y += 110
+                
+                curr_y += 20
+                draw.rectangle([(60, curr_y), (160, curr_y+10)], fill=color_main)
+                curr_y += 40
+                
+                for line in d_lines:
+                    draw_text_with_stroke(draw, (60, curr_y), line, font_body, fill="#eeeeee", stroke_width=2)
+                    curr_y += 60
 
             elif sType == 'DATA':
                 head = clean_text_spacing(slide.get('HEAD', ''))
@@ -475,12 +493,14 @@ if st.button("🚀 카드뉴스 제작"):
                 if layout == 'BOX': 
                     box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
                     start_y = (CANVAS_H - box_h) // 2
+                    if start_y < 150: start_y = 150 # 상단 침범 방지
+                    
                     draw_rounded_box(draw, (80, start_y, CANVAS_W-80, start_y + box_h), 30, (0,0,0,160))
                     txt_y = start_y + 50
                     for line in h_lines:
-                        draw_text_with_stroke(draw, (120, txt_y), line, font_title, fill=color_main, stroke_width=0)
+                        draw_text_with_stroke(draw, (120, txt_y), line, font_title, fill=title_color, stroke_width=0)
                         txt_y += 110
-                    draw.line((120, txt_y+10, 320, txt_y+10), fill=color_main, width=5)
+                    draw.line((120, txt_y+10, 320, txt_y+10), fill=title_color, width=5)
                     txt_y += 40
                     for line in d_lines:
                         draw_text_with_stroke(draw, (120, txt_y), line, font_body, fill="white", stroke_width=0)
@@ -488,6 +508,8 @@ if st.button("🚀 카드뉴스 제작"):
                 elif layout == 'BAR': 
                     total_h = (len(h_lines)*110) + (len(d_lines)*65) + 60
                     start_y = (CANVAS_H - total_h) // 2
+                    if start_y < 150: start_y = 150
+                    
                     draw.rectangle([(80, start_y), (95, start_y + total_h)], fill=color_main)
                     txt_y = start_y
                     for line in h_lines:
@@ -541,6 +563,7 @@ if st.button("🚀 카드뉴스 제작"):
         
         st.success("✅ 제작 완료! 해시태그를 복사해서 쓰세요.")
         st.code(hashtags, language="text")
+        
         st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_complete.zip", "application/zip", use_container_width=True)
 
     except Exception as e: st.error(f"이미지 생성 중 오류 발생: {e}")
