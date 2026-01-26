@@ -5,89 +5,43 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import io
-import re
 import random
 import zipfile
 import qrcode
 import os
 import numpy as np
-
-# --- [설정] 자산 파일명 (반드시 이 이름으로 파일을 넣어주세요) ---
-ASSET_CONFIG = {
-    "logo_symbol": "segye_symbol.png", # 심볼 (이미지)
-    "logo_text": "segye_text.png",     # 텍스트 로고 (이미지)
-    "font_title": "Title.ttf",
-    "font_body": "Body.ttf",
-    "font_serif": "Serif.ttf"
-}
+import fitz  # PyMuPDF (AI파일 변환용)
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.1", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.1 Hybrid Logo)")
-st.markdown("### 💎 심볼+텍스트 분리형 로고 시스템 적용")
+st.set_page_config(page_title="One-Click News v9.2", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.2 Robuster)")
+st.markdown("### 💎 파싱 오류 완벽 수정 & 로고 업로더 복구")
 
-# --- [기능] 로컬 자산 로드 ---
+# --- 리소스 캐싱 ---
 @st.cache_resource
-def load_local_assets():
-    assets = {}
-    
-    # 1. 폰트 로드 함수
-    def load_font(filename, fallback_url):
-        if os.path.exists(filename):
-            with open(filename, "rb") as f: return f.read()
-        return requests.get(fallback_url).content
+def get_resources():
+    resources = {}
+    try:
+        # 기본 폰트 (업로드 없을 때 비상용)
+        resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf", timeout=10).content
+        resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
+        resources['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
+    except: return None
+    return resources
 
-    assets['title'] = load_font(ASSET_CONFIG['font_title'], "https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf")
-    assets['body'] = load_font(ASSET_CONFIG['font_body'], "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf")
-    assets['serif'] = load_font(ASSET_CONFIG['font_serif'], "https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf")
+# --- 디자인 유틸리티 ---
+def add_noise_texture(img, intensity=0.05):
+    if img.mode != 'RGBA': img = img.convert('RGBA')
+    width, height = img.size
+    noise = np.random.randint(0, 255, (height, width, 4), dtype=np.uint8)
+    noise[:, :, 3] = int(255 * intensity)
+    return Image.alpha_composite(img, Image.fromarray(noise, 'RGBA'))
 
-    # 2. 로고 2종 로드 (심볼, 텍스트)
-    def load_image(filename, width_target):
-        if os.path.exists(filename):
-            try:
-                img = Image.open(filename).convert("RGBA")
-                aspect = img.height / img.width
-                return img.resize((width_target, int(width_target * aspect)))
-            except: pass
-        return None
-
-    # 심볼은 가로 60px, 텍스트 로고는 가로 160px 정도로 리사이징
-    assets['symbol'] = load_image(ASSET_CONFIG['logo_symbol'], 60)
-    assets['logotxt'] = load_image(ASSET_CONFIG['logo_text'], 160)
-    
-    return assets
-
-# --- [디자인] 유틸리티 함수 ---
-
-def paste_hybrid_logo(bg_img, symbol, logotxt, x=50, y=50, gap=15):
-    """
-    HTML/CSS의 flex 배치처럼 심볼과 텍스트를 나란히 붙이는 함수
-    """
-    # 심볼 붙이기
-    if symbol:
-        bg_img.paste(symbol, (x, y), symbol)
-        next_x = x + symbol.width + gap
-    else:
-        next_x = x
-
-    # 텍스트 로고 붙이기 (수직 중앙 정렬 보정)
-    if logotxt:
-        # 심볼 높이의 중간에 텍스트가 오도록 계산
-        if symbol:
-            center_y = y + (symbol.height // 2)
-            txt_y = center_y - (logotxt.height // 2)
-        else:
-            txt_y = y
-        bg_img.paste(logotxt, (next_x, txt_y), logotxt)
-
-def is_color_dark(hex_color):
-    hex_color = hex_color.lstrip('#')
-    if len(hex_color) != 6: return False
-    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 120
+def draw_rounded_box(draw, xy, r, fill):
+    draw.rounded_rectangle(xy, radius=r, fill=fill)
 
 def create_glass_box(draw, xy, r, fill=(0,0,0,160)):
-    draw.rounded_rectangle(xy, radius=r, fill=fill)
+    draw_rounded_box(draw, xy, r, fill)
 
 def create_smooth_gradient(width, height):
     overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -101,11 +55,11 @@ def create_smooth_gradient(width, height):
 
 def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color="black", offset=(3, 3)):
     x, y = position
-    draw.text((x + offset[0], y + offset[1]), text, font=font, fill=shadow_color)
-    draw.text((x-1, y), text, font=font, fill=shadow_color)
-    draw.text((x+1, y), text, font=font, fill=shadow_color)
-    draw.text((x, y-1), text, font=font, fill=shadow_color)
-    draw.text((x, y+1), text, font=font, fill=shadow_color)
+    # 강력한 그림자 (가독성 보장)
+    for ox in [-1, 0, 1]:
+        for oy in [-1, 0, 1]:
+            if ox == 0 and oy == 0: continue
+            draw.text((x+ox*2, y+oy*2), text, font=font, fill=shadow_color)
     draw.text((x, y), text, font=font, fill=fill)
 
 def wrap_text(text, font, max_width, draw):
@@ -127,7 +81,35 @@ def generate_qr_code(link):
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white")
 
-# --- 스크래핑 ---
+def render_ai_to_image(ai_bytes):
+    try:
+        doc = fitz.open(stream=ai_bytes, filetype="pdf")
+        page = doc.load_page(0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
+        return Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
+    except: return None
+
+def is_color_dark(hex_color):
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) != 6: return False
+    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 120
+
+def paste_hybrid_logo(bg_img, symbol, logotxt, x=50, y=50, gap=15):
+    """심볼과 텍스트 로고를 나란히 배치"""
+    next_x = x
+    if symbol:
+        bg_img.paste(symbol, (x, y), symbol)
+        next_x += symbol.width + gap
+    
+    if logotxt:
+        # 심볼 중앙 높이에 텍스트 맞춤
+        target_y = y
+        if symbol:
+            target_y = y + (symbol.height - logotxt.height) // 2
+        bg_img.paste(logotxt, (next_x, target_y), logotxt)
+
+# --- 스크래핑 엔진 ---
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
     try:
@@ -158,36 +140,57 @@ with st.sidebar:
     api_key = st.text_input("Google API Key", type="password")
     if api_key: genai.configure(api_key=api_key)
     st.markdown("---")
-    user_image = st.file_uploader("기사 사진 업로드 (1순위)", type=['png', 'jpg', 'jpeg'])
-    st.success("✅ 로고(심볼+텍스트)와 폰트가 고정되었습니다.")
+    user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
+    
+    st.markdown("#### 🎨 로고 & 폰트")
+    # 로고 업로더 부활 (확실한 적용을 위해)
+    symbol_file = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
+    text_logo_file = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
+    
+    font_title = st.file_uploader("제목 폰트 (Gmarket/BlackHanSans)", type=['ttf', 'otf'])
+    font_body = st.file_uploader("본문 폰트 (Noto/Gothic)", type=['ttf', 'otf'])
+    font_serif = st.file_uploader("명조 폰트 (Serif)", type=['ttf', 'otf'])
 
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
-if st.button("🚀 세계일보 카드뉴스 제작"):
+if st.button("🚀 카드뉴스 제작"):
     if not api_key or not url: st.error("설정 확인 필요"); st.stop()
     
     status = st.empty()
-    status.info("📰 기사 분석 및 디자인 적용 중...")
+    status.info("📰 기사 분석 중...")
     
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- AI 프롬프트 ---
+    # --- AI 프롬프트 (v9.2) ---
     try:
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         prompt = f"""
-        당신은 세계일보의 '디지털 스토리텔링 에디터'입니다.
-        [기사] 제목: {title} / 내용: {text[:6000]}
+        당신은 세계일보의 '비주얼 에디터'입니다.
+        
+        [기사]
+        제목: {title}
+        내용: {text[:6000]}
+        
         [규칙]
         1. **총 8장 (Cover 1 + Story 6 + Outro 1)**
-        2. **Cover:** HEAD(10자 이내), DESC(40자 이내)
-        3. **Story:** HEAD(키워드), DESC(80~100자 내외 충실히). 반복 금지.
+        2. **Cover:** HEAD(10자 이내 훅), DESC(40자 이내 요약)
+        3. **Story:** 각 장마다 **새로운 내용**을 담으세요. (반복 금지)
+           - HEAD: 10자 이내 핵심 키워드
+           - DESC: 80~100자 내외의 **꽉 찬** 설명.
         4. **Color:** 기사 분위기에 맞는 짙은 색상(Hex) 1개.
-        [출력]
+        
+        [출력 양식]
         COLOR_MAIN: #Hex
+        
         [SLIDE 1]
         TYPE: COVER
+        HEAD: ...
+        DESC: ...
+        
+        [SLIDE 2]
+        TYPE: CONTENT
         HEAD: ...
         DESC: ...
         ...
@@ -197,29 +200,64 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         DESC: 세상을 보는 눈, 세계일보
         """
         response = model.generate_content(prompt)
+        res_text = response.text
         
         slides = []
         curr = {}
         color_main = "#FFD700"
         
-        for line in response.text.split('\n'):
+        for line in res_text.split('\n'):
             line = line.strip()
             if not line: continue
-            if line.startswith("COLOR_MAIN:"): color_main = line.split(":")[1].strip()
-            elif "[SLIDE" in line:
+            
+            # [핵심 수정: 파싱 강화]
+            # **HEAD:** 처럼 별표가 붙어 나와도 제거하고 인식하도록 처리
+            clean_line = line.replace('*', '').strip() 
+            
+            if clean_line.startswith("COLOR_MAIN:"): color_main = clean_line.split(":")[1].strip()
+            elif "[SLIDE" in clean_line:
                 if curr: slides.append(curr)
                 curr = {"HEAD": "", "DESC": "", "TYPE": ""}
-            elif line.startswith("TYPE:"): curr["TYPE"] = line.split(":")[1].strip()
-            elif line.startswith("HEAD:"): curr["HEAD"] = line.split("HEAD:")[1].strip()
-            elif line.startswith("DESC:"): curr["DESC"] = line.split("DESC:")[1].strip()
+            elif clean_line.startswith("TYPE:"): curr["TYPE"] = clean_line.split(":")[1].strip()
+            elif clean_line.startswith("HEAD:"): curr["HEAD"] = clean_line.split("HEAD:")[1].strip()
+            elif clean_line.startswith("DESC:"): curr["DESC"] = clean_line.split("DESC:")[1].strip()
+            
         if curr: slides.append(curr)
         
     except: st.error("기획 실패"); st.stop()
 
     # --- 자산 로드 ---
     try:
-        assets = load_local_assets()
+        # 1. 폰트 로드 (파일 있으면 쓰고, 없으면 기본값)
+        res_default = get_resources()
         
+        def load_font_bytes(uploaded, default):
+            if uploaded: return uploaded.getvalue()
+            return default
+            
+        b_title = load_font_bytes(font_title, res_default['title'])
+        b_body = load_font_bytes(font_body, res_default['body'])
+        b_serif = load_font_bytes(font_serif, res_default['serif'])
+        
+        # 2. 로고 로드 (업로드된 파일 처리)
+        def load_uploaded_logo(uploaded, width_target):
+            if not uploaded: return None
+            data = uploaded.getvalue()
+            img = None
+            if uploaded.name.lower().endswith('.ai'):
+                img = render_ai_to_image(data)
+            else:
+                img = Image.open(io.BytesIO(data)).convert("RGBA")
+            
+            if img:
+                ar = img.height / img.width
+                return img.resize((width_target, int(width_target * ar)))
+            return None
+
+        img_symbol = load_uploaded_logo(symbol_file, 60)
+        img_logotxt = load_uploaded_logo(text_logo_file, 160)
+
+        # 3. 배경 이미지
         if user_image: base_img = Image.open(user_image)
         elif img_url:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -227,7 +265,7 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         else: base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         base_img = base_img.convert('RGB').resize((1080, 1080))
         
-        # 배경 세트 생성
+        # 4. 배경 변주 생성
         grad = create_smooth_gradient(1080, 1080)
         bg_cover = base_img.copy()
         bg_cover.paste(grad, (0,0), grad)
@@ -238,11 +276,12 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         
         try: bg_outro = Image.new('RGB', (1080, 1080), color=color_main)
         except: bg_outro = Image.new('RGB', (1080, 1080), color='#1a1a2e')
+        bg_outro = add_noise_texture(bg_outro, 0.03)
 
     except Exception as e: st.error(f"자산 오류: {e}"); st.stop()
 
     # --- 렌더링 ---
-    st.markdown(f"### 📸 Segae Hybrid Logo Edition ({len(slides)} Pages)")
+    st.markdown(f"### 📸 Segae Final Edition ({len(slides)} Pages)")
     generated_images = []
     tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
     
@@ -255,18 +294,19 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
             
         draw = ImageDraw.Draw(img, 'RGBA')
         
-        # 폰트
-        ft_head = ImageFont.truetype(io.BytesIO(assets['title']), 95)
-        ft_desc = ImageFont.truetype(io.BytesIO(assets['body']), 48)
-        ft_small = ImageFont.truetype(io.BytesIO(assets['body']), 30)
-        ft_serif = ImageFont.truetype(io.BytesIO(assets['serif']), 90)
+        # 폰트 매번 생성 (안정성)
+        ft_head = ImageFont.truetype(io.BytesIO(b_title), 95)
+        ft_desc = ImageFont.truetype(io.BytesIO(b_body), 48)
+        ft_small = ImageFont.truetype(io.BytesIO(b_body), 30)
+        ft_serif = ImageFont.truetype(io.BytesIO(b_serif), 90)
         
-        # [NEW] 로고 2종(심볼+텍스트) 나란히 붙이기
+        # [로고 배치]
         if slide['TYPE'] != 'OUTRO':
-            # paste_hybrid_logo 함수가 CSS Flex 효과를 냅니다
-            paste_hybrid_logo(img, assets.get('symbol'), assets.get('logotxt'), x=50, y=50, gap=15)
+            paste_hybrid_logo(img, img_symbol, img_logotxt, x=50, y=50, gap=15)
+            # 텍스트 로고가 없으면 텍스트로 대체
+            if not img_logotxt and not img_symbol:
+                draw.text((50, 50), "SEGYE BRIEFING", font=ft_small, fill="#FFD700")
             
-            # 페이지 번호
             draw.text((950, 60), f"{i+1} / {len(slides)}", font=ft_small, fill="white")
 
         # [COVER]
@@ -331,7 +371,7 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
                     start_y += 65
                     
             elif layout == 'QUOTE':
-                draw.text((80, 250), "“", font=ImageFont.truetype(io.BytesIO(assets['serif']), 400), fill=(255, 255, 255, 30))
+                draw.text((80, 250), "“", font=ImageFont.truetype(io.BytesIO(b_serif), 400), fill=(255, 255, 255, 30))
                 h_lines = wrap_text(head, ft_head, 850, draw)
                 d_lines = wrap_text(desc, ft_desc, 850, draw)
                 start_y = 450
@@ -362,7 +402,7 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
             qr_img = generate_qr_code(url).resize((220, 220))
             qr_x = (1080 - 240) // 2
             qr_y = 650
-            draw.rounded_rectangle((qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
+            draw_rounded_box(draw, (qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
             img.paste(qr_img, (qr_x+10, qr_y+10))
             
             msg = "기사 원문 보러가기"
@@ -380,4 +420,4 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_hybrid.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_final.zip", "application/zip", use_container_width=True)
