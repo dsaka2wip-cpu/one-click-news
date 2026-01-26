@@ -139,7 +139,8 @@ with st.sidebar:
     if api_key: genai.configure(api_key=api_key)
     st.markdown("---")
     user_image = st.file_uploader("기사 사진 업로드 (1순위)", type=['png', 'jpg', 'jpeg'])
-    logo_file = st.file_uploader("세계일보 로고/CI (PNG 권장)", type=['png'])
+    logo_file = st.file_uploader("세계일보 로고/CI (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
+    body_font_file = st.file_uploader("본문 폰트 업로드 (TTF/OTF)", type=['ttf', 'otf'])
 
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -265,10 +266,11 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         draw = ImageDraw.Draw(img)
         
         # 폰트
+        body_font_bytes = body_font_file.getvalue() if body_font_file else res['body']
         f_head = ImageFont.truetype(BytesIO(res['title']), 95) # 더 키움
-        f_desc = ImageFont.truetype(BytesIO(res['body']), 48)
+        f_desc = ImageFont.truetype(BytesIO(body_font_bytes), 48)
         f_serif = ImageFont.truetype(BytesIO(res['serif']), 90)
-        f_small = ImageFont.truetype(BytesIO(res['body']), 30)
+        f_small = ImageFont.truetype(BytesIO(body_font_bytes), 30)
         
         # [공통] CI 로고 삽입 (좌측 상단)
         if slide.get("TYPE") != "OUTRO":
