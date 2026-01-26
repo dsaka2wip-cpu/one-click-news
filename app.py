@@ -14,7 +14,7 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v13.6", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v13.7", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -151,7 +151,6 @@ def create_smooth_gradient(w, h):
 def draw_text_with_stroke(draw, pos, text, font, fill="white", stroke_fill="black", stroke_width=2):
     draw.text(pos, text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
-# [수정] 뱃지 위치 정교화 및 디자인 개선
 def draw_pill_badge(draw, x, y, text, font, bg_color="#C80000"):
     padding_x, padding_y = 15, 6
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -161,14 +160,13 @@ def draw_pill_badge(draw, x, y, text, font, bg_color="#C80000"):
     h = text_h + padding_y * 2
     w = text_w + padding_x * 2
     
-    # 알약 모양
     draw.ellipse((x, y, x+h, y+h), fill=bg_color) 
     draw.ellipse((x+w-h, y, x+w, y+h), fill=bg_color)
     draw.rectangle((x+h//2, y, x+w-h//2, y+h), fill=bg_color)
     
-    # 텍스트 중앙 보정
     draw.text((x + padding_x, y + padding_y - 2), text, font=font, fill="white")
 
+# [수정] 변수명 오타 수정 (curr -> current_line)
 def wrap_text(text, font, max_width, draw):
     lines = []
     text = clean_text_spacing(text)
@@ -176,7 +174,7 @@ def wrap_text(text, font, max_width, draw):
     for para in text.split('\n'):
         if not para.strip(): continue
         words = para.split(' ')
-        curr = words[0]
+        current_line = words[0] # [Fix] 변수명 통일
         for word in words[1:]:
             bbox = draw.textbbox((0, 0), current_line + " " + word, font=font)
             if bbox[2] - bbox[0] <= max_width: current_line += " " + word
@@ -190,7 +188,6 @@ def generate_qr_code(link):
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white").convert("RGBA")
 
-# 로고 배치 및 뱃지 기준점 반환
 def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     check_area = (x, y, x+300, y+100)
     brightness = check_brightness(bg_img, check_area)
@@ -207,7 +204,6 @@ def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     
     if logotxt:
         txt_to_paste = recolor_image_to_white(logotxt) if use_white else logotxt
-        # 텍스트 로고 수직 중앙 정렬
         target_y = y + (symbol.height - logotxt.height) // 2 if symbol else y
         bg_img.paste(txt_to_paste, (next_x, target_y), txt_to_paste)
         next_x += logotxt.width
@@ -221,7 +217,7 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v13.6 Ultimate Integrity)")
+st.title("📰 One-Click News (v13.7 Bug Fix)")
 
 # 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -229,20 +225,17 @@ url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/..."
 # 2. 실행 버튼
 run_button = st.button("🚀 카드뉴스 제작")
 
-# 3. 결과 컨테이너 (여기에 카드가 뜸)
+# 3. 결과 컨테이너
 result_container = st.container()
 
-# 4. [필독] 상세 안내문 (항상 펼침, 전체 히스토리 포함)
+# 4. 상세 안내문
 st.markdown("---")
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성기: 기술 명세 및 가이드 (Full Ver.)", expanded=True):
+with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Full Spec)", expanded=True):
     st.markdown("""
-    ### 📌 프로젝트 개요
-    이 도구는 단순한 텍스트 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI(Gemini Pro)** 기술을 결합하여, 기사의 맥락을 완벽하게 이해하고 시각화하는 **'지능형 콘텐츠 파트너'**입니다.
-
-    ---
+    이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI(Gemini Pro)** 기술을 결합하여, 기사의 맥락을 완벽하게 이해하고 시각화하는 **'지능형 콘텐츠 파트너'**입니다.
 
     ### 🧠 1. Intelligence (맥락 인식 및 기획)
-    * **내러티브 구조화 (Narrative Arc):** 기계적인 요약을 거부합니다. 기사를 **'Hook(도입) - Content(전개) - Conclusion(결론)'**의 8단 서사 구조로 재구성하여 독자의 몰입을 유도합니다.
+    * **내러티브 구조화 (Narrative Arc):** 기사를 기계적으로 줄이지 않고, **'Hook(도입) - Content(전개) - Conclusion(결론)'**의 8단 서사 구조로 재구성하여 독자의 몰입을 유도합니다.
     * **맥락 기반 레이아웃 결정 (Context-Aware Design):** AI가 문단의 성격을 스스로 분석합니다.
         * **인용(Quote):** 인터뷰나 핵심 발언이 나오면 따옴표 디자인 적용.
         * **데이터(Data):** 숫자나 통계가 핵심이면 인포그래픽(Big Number) 디자인 적용.
@@ -259,7 +252,6 @@ with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성기: 기술 �
     * **자동 자산 로드:** 로고와 전용 폰트를 서버에 내장하여, 매번 파일을 업로드하는 불편함을 없앴습니다.
     * **멀티 이미지 스크래핑:** 기사 썸네일뿐만 아니라 본문의 모든 이미지를 수집하여, 슬라이드마다 다채로운 배경을 제공합니다.
     * **Visual SEO:** 인스타그램 유입을 극대화하기 위해 기사 내용에 최적화된 **해시태그**를 자동 생성합니다.
-    * **타이포그래피 자동 교정:** `3 . 1절`과 같은 어색한 띄어쓰기를 정규표현식 엔진이 자동으로 교정합니다.
     """)
 
 # ==============================================================================
@@ -432,16 +424,15 @@ if run_button:
                         next_x = 320
 
                     if news_tag:
-                        # 뱃지 높이(약 50px)를 고려하여 로고 중앙에 맞춤
                         badge_y = top_y + (logo_height // 2) - 25 
                         draw_pill_badge(draw, next_x, badge_y, news_tag, f_badge, bg_color="#C80000")
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
-                # 내용 그리기 (여백 120px 확보)
+                # 내용 그리기
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
-                content_width = CANVAS_W - 240 # 좌우 120씩 여백
+                content_width = CANVAS_W - 240 
                 
                 if sType == 'COVER':
                     d_lines = wrap_text(desc, f_body, content_width, draw)
@@ -505,10 +496,10 @@ if run_button:
                     brand = "세상을 보는 눈, 세계일보"
                     w2 = draw.textlength(brand, font=f_body)
                     draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=f_body, fill=out_c)
-                    qr = generate_qr_code(url).resize((250, 250))
+                    qr = generate_qr_code(url).resize((250, 250)).convert("RGBA")
                     qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
                     draw.rounded_rectangle((qx, qy, qx+250, qy+250), 20, "white")
-                    img.paste(qr, (qx+10, qy+10), qr) # Mask 사용
+                    img.paste(qr, (qx+10, qy+10), qr)
                     msg = "기사 원문 보러가기"
                     w3 = draw.textlength(msg, font=f_small)
                     draw.text(((CANVAS_W-w3)/2, qy + 270), msg, font=f_small, fill=out_c)
@@ -535,7 +526,6 @@ if run_button:
                 generated_images.append(img)
                 with tabs[i]: st.image(img)
 
-            # 다운로드
             zip_buf = io.BytesIO()
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for i, img in enumerate(generated_images):
