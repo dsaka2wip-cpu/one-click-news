@@ -14,11 +14,11 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v10.4", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v10.4 Variable Fix)")
-st.markdown("### 💎 변수 충돌 해결 & 안정성 강화 버전")
+st.set_page_config(page_title="One-Click News v10.5", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v10.5 Design Polish)")
+st.markdown("### 💎 레이아웃 변주 복구 & 타이포그래피 개선")
 
-# --- [설정] 서버 파일명 ---
+# --- [설정] 자산 파일명 ---
 ASSET_FILENAMES = {
     "symbol": "segye_symbol.png",
     "text": "segye_text.png",
@@ -27,45 +27,37 @@ ASSET_FILENAMES = {
     "font_serif": "Serif.ttf"
 }
 
-# --- 리소스 캐싱 ---
+# --- 리소스 캐싱 (폰트 변경) ---
 @st.cache_resource
 def get_web_resources():
     resources = {}
     try:
-        resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf", timeout=10).content
-        resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
+        # [변경] 제목용: Noto Sans KR Black (숫자 간격 문제 해결)
+        resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Black.ttf", timeout=10).content
+        # 본문용: Noto Sans KR Bold
+        resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Bold.ttf", timeout=10).content
+        # 명조용: Noto Serif KR
         resources['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
     except: return None
     return resources
 
-# --- [핵심 수정] 안전한 자산 로더 ---
 def load_asset_bytes(uploader, filename, fallback_bytes=None):
-    # 1. 업로더가 있고, 실제 파일 객체인지 확인 (에러 방지 핵심)
-    if uploader and hasattr(uploader, 'getvalue'):
-        return uploader.getvalue()
-    # 2. 로컬 파일 확인
+    if uploader: return uploader.getvalue()
     if os.path.exists(filename):
         with open(filename, "rb") as f: return f.read()
-    # 3. 기본값 반환
     return fallback_bytes
 
 def load_logo_image(uploader, filename, width_target):
     data = load_asset_bytes(uploader, filename)
     if not data: return None
     try:
-        # AI 파일 대응
-        is_ai = False
-        if filename.lower().endswith('.ai'): is_ai = True
-        if uploader and hasattr(uploader, 'name') and uploader.name.lower().endswith('.ai'): is_ai = True
-            
-        if is_ai:
+        if filename.lower().endswith('.ai') or (uploader and uploader.name.lower().endswith('.ai')):
             doc = fitz.open(stream=data, filetype="pdf")
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
             img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
         else:
             img = Image.open(io.BytesIO(data)).convert("RGBA")
-        
         ar = img.height / img.width
         return img.resize((width_target, int(width_target * ar)))
     except: return None
@@ -82,6 +74,12 @@ def get_available_model():
     except: return "models/gemini-pro"
 
 # --- 디자인 유틸리티 ---
+def clean_text(text):
+    """텍스트 내 불필요한 공백 제거 (3 . 1절 -> 3.1절)"""
+    text = re.sub(r'\s+', ' ', text).strip() # 다중 공백 제거
+    text = text.replace(" . ", ".").replace(" , ", ",") # 특수문자 주변 공백 정리
+    return text
+
 def validate_hex_color(color_str):
     try:
         match = re.search(r'#(?:[0-9a-fA-F]{3}){1,2}', str(color_str))
@@ -92,18 +90,8 @@ def validate_hex_color(color_str):
         return "#FFD700"
     except: return "#FFD700"
 
-def add_noise_texture(img, intensity=0.05):
-    if img.mode != 'RGBA': img = img.convert('RGBA')
-    width, height = img.size
-    noise = np.random.randint(0, 255, (height, width, 4), dtype=np.uint8)
-    noise[:, :, 3] = int(255 * intensity)
-    return Image.alpha_composite(img, Image.fromarray(noise, 'RGBA'))
-
 def draw_rounded_box(draw, xy, radius, fill):
     draw.rounded_rectangle(xy, radius=radius, fill=fill)
-
-def create_glass_box(draw, xy, radius, fill=(0,0,0,160)):
-    draw_rounded_box(draw, xy, radius, fill)
 
 def create_smooth_gradient(width, height):
     overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -111,7 +99,7 @@ def create_smooth_gradient(width, height):
     for y in range(height):
         ratio = y / height
         if ratio > 0.3:
-            alpha = int(255 * ((ratio - 0.3) / 0.7) ** 2)
+            alpha = int(255 * ((ratio - 0.3) / 0.7) ** 1.5)
             draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     return overlay
 
@@ -124,6 +112,7 @@ def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color
 
 def wrap_text(text, font, max_width, draw):
     lines = []
+    text = clean_text(text)
     for paragraph in text.split('\n'):
         if not paragraph.strip(): continue
         words = paragraph.split(' ')
@@ -183,7 +172,7 @@ def advanced_scrape(url):
         except: pass
     return title, text, top_image
 
-# --- 사이드바 (변수명 충돌 해결) ---
+# --- 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정")
     api_key = st.text_input("Google API Key", type="password")
@@ -192,7 +181,6 @@ with st.sidebar:
     user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
     
     st.markdown("#### 🎨 로고 & 폰트")
-    # [수정] 변수명을 up_ 접두어로 구분
     up_symbol = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
     up_text_logo = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
     
@@ -204,7 +192,7 @@ with st.sidebar:
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
-if st.button("🚀 카드뉴스 제작 (Final)"):
+if st.button("🚀 카드뉴스 제작 (v10.5)"):
     if not api_key: st.error("API Key를 입력해주세요."); st.stop()
     if not url: st.error("URL을 입력해주세요."); st.stop()
     
@@ -216,7 +204,7 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
     # --- AI 기획 ---
     try:
         model_name = get_available_model()
-        status.info(f"🤖 AI 모델({model_name}) 연결. 기획 중...")
+        status.info(f"🤖 AI 기획 중... ({model_name})")
         model = genai.GenerativeModel(model_name)
         
         safety_settings = [
@@ -232,24 +220,24 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
         [기사 내용] {text[:4000]}
         
         [필수 규칙]
-        1. 무조건 8장(슬라이드)으로 구성하세요.
-        2. 출력 형식은 아래 포맷을 **정확히** 지키세요.
-        3. 각 슬라이드의 'DESC'(설명)는 2~3문장으로 충실하게 작성하세요.
+        1. 무조건 8장(슬라이드)으로 구성.
+        2. 각 장의 DESC(본문)는 80자 내외로 충실하게.
+        3. 출력 형식을 엄수할 것.
         
         [출력 포맷]
-        COLOR_MAIN: #대표색상코드
+        COLOR_MAIN: #HexCode
         
         [SLIDE 1]
         TYPE: COVER
-        HEAD: (제목 15자 이내)
-        DESC: (부제/요약 40자 이내)
+        HEAD: (제목)
+        DESC: (요약)
         
         [SLIDE 2]
         TYPE: CONTENT
         HEAD: (소제목)
-        DESC: (본문 내용 - 80자 내외)
+        DESC: (내용)
         
-        ... (3~7 반복) ...
+        ... (3~7) ...
         
         [SLIDE 8]
         TYPE: OUTRO
@@ -284,19 +272,19 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
         if current_slide: slides.append(current_slide)
         
         while len(slides) < 8:
-            slides.append({"TYPE": "CONTENT", "HEAD": "내용 없음", "DESC": "AI 생성 오류로 내용이 누락되었습니다."})
+            slides.append({"TYPE": "CONTENT", "HEAD": "내용 없음", "DESC": "AI 생성 오류"})
             
     except Exception as e: st.error(f"AI 기획 실패: {e}"); st.stop()
 
     # --- 이미지 생성 ---
-    status.info("🎨 이미지를 렌더링하고 있습니다...")
+    status.info("🎨 레이아웃 디자인 및 렌더링 중...")
     try:
         web_fonts = get_web_resources()
         def safe_font(font_bytes, size):
             try: return ImageFont.truetype(io.BytesIO(font_bytes), size)
             except: return ImageFont.load_default()
 
-        # [수정] 업로더 변수(up_~)와 폰트객체(font_~) 이름 구분
+        # [폰트 적용]
         font_title = safe_font(load_asset_bytes(up_font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 95)
         font_body = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 48)
         font_small = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 30)
@@ -335,63 +323,104 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
             
             draw = ImageDraw.Draw(img, 'RGBA')
             
+            # [공통] 로고
             if sType != 'OUTRO':
                 if img_symbol or img_logotxt:
-                    paste_hybrid_logo(img, img_symbol, img_logotxt, x=50, y=50)
+                    paste_hybrid_logo(img, img_symbol, img_logotxt, x=60, y=60)
                 else:
-                    draw.text((50, 50), "SEGYE BRIEFING", font=font_small, fill=color_main)
+                    draw.text((60, 60), "SEGYE BRIEFING", font=font_small, fill=color_main)
                 draw.text((950, 60), f"{i+1} / {len(slides)}", font=font_small, fill="white")
 
+            # [1] COVER
             if sType == 'COVER':
                 head = slide.get('HEAD', '')
                 desc = slide.get('DESC', '')
                 d_lines = wrap_text(desc, font_body, 980, draw)
                 current_y = 1080 - 120 - (len(d_lines) * 60)
                 for line in d_lines:
-                    draw_text_with_shadow(draw, (50, current_y), line, font_body, fill="#eeeeee")
+                    draw_text_with_shadow(draw, (60, current_y), line, font_body, fill="#eeeeee")
                     current_y += 60
                 current_y -= (len(d_lines)*60 + 40)
-                draw.rectangle([(50, current_y), (150, current_y+10)], fill=color_main)
+                draw.rectangle([(60, current_y), (160, current_y+10)], fill=color_main)
                 h_lines = wrap_text(head, font_title, 980, draw)
                 current_y -= (len(h_lines) * 110 + 20)
                 for line in h_lines:
-                    draw_text_with_shadow(draw, (50, current_y), line, font_title, fill="white", offset=(4,4))
+                    draw_text_with_shadow(draw, (60, current_y), line, font_title, fill="white", offset=(4,4))
                     current_y += 110
 
+            # [2] CONTENT (레이아웃 3종 랜덤 적용)
             elif sType == 'CONTENT':
+                # [복구] 랜덤 레이아웃 엔진
+                layout = random.choice(['BOX', 'BAR', 'QUOTE'])
                 head = slide.get('HEAD', '')
                 desc = slide.get('DESC', '')
-                h_lines = wrap_text(head, font_title, 850, draw)
-                d_lines = wrap_text(desc, font_body, 850, draw)
-                box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
-                start_y = (1080 - box_h) // 2
-                create_glass_box(draw, (80, start_y, 1000, start_y + box_h), 30)
-                txt_y = start_y + 50
-                for line in h_lines:
-                    draw.text((120, txt_y), line, font=font_title, fill=title_color)
-                    txt_y += 110
-                draw.line((120, txt_y+10, 320, txt_y+10), fill=title_color, width=5)
-                txt_y += 40
-                for line in d_lines:
-                    draw.text((120, txt_y), line, font=font_body, fill="white")
-                    txt_y += 65
+                
+                h_lines = wrap_text(head, font_title, 900, draw)
+                d_lines = wrap_text(desc, font_body, 900, draw)
+                
+                if layout == 'BOX': # 박스형 (기존)
+                    box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
+                    start_y = (1080 - box_h) // 2
+                    draw_rounded_box(draw, (80, start_y, 1000, start_y + box_h), 30, (0,0,0,160))
+                    txt_y = start_y + 50
+                    for line in h_lines:
+                        draw.text((120, txt_y), line, font=font_title, fill=title_color)
+                        txt_y += 110
+                    draw.line((120, txt_y+10, 320, txt_y+10), fill=title_color, width=5)
+                    txt_y += 40
+                    for line in d_lines:
+                        draw.text((120, txt_y), line, font=font_body, fill="white")
+                        txt_y += 65
+                        
+                elif layout == 'BAR': # 좌측 바형
+                    start_y = (1080 - ((len(h_lines)*110) + (len(d_lines)*65) + 60)) // 2
+                    draw.rectangle([(80, start_y), (95, start_y + (len(h_lines)*110) + (len(d_lines)*65) + 60)], fill=color_main)
+                    txt_y = start_y
+                    for line in h_lines:
+                        draw_text_with_shadow(draw, (120, txt_y), line, font_title)
+                        txt_y += 110
+                    txt_y += 30
+                    for line in d_lines:
+                        draw_text_with_shadow(draw, (120, txt_y), line, font_body, fill="#dddddd")
+                        txt_y += 65
+                        
+                elif layout == 'QUOTE': # 따옴표형
+                    start_y = 350
+                    # 거대 따옴표
+                    draw.text((80, start_y - 150), "“", font=font_serif, fill=(255,255,255,50), font_size=300) 
+                    for line in h_lines:
+                        draw_text_with_shadow(draw, (150, start_y), line, font_title)
+                        start_y += 110
+                    draw.line((150, start_y+20, 350, start_y+20), fill=color_main, width=5)
+                    start_y += 60
+                    for line in d_lines:
+                        draw_text_with_shadow(draw, (150, start_y), line, font_body, fill="#cccccc")
+                        start_y += 65
 
+            # [3] OUTRO
             elif sType == 'OUTRO':
                 out_color = "white" if is_color_dark(color_main) else "black"
                 slogan = "First in, Last out"
                 bbox = draw.textbbox((0,0), slogan, font=font_serif)
                 w = bbox[2] - bbox[0]
                 draw.text(((1080-w)/2, 350), slogan, font=font_serif, fill=out_color)
+                
                 brand = "세상을 보는 눈, 세계일보"
                 bbox2 = draw.textbbox((0,0), brand, font=font_body)
                 w2 = bbox2[2] - bbox2[0]
                 draw.text(((1080-w2)/2, 480), brand, font=font_body, fill=out_color)
+                
                 qr_img = generate_qr_code(url).resize((220, 220))
                 qr_x = (1080 - 240) // 2
                 qr_y = 650
-                draw_rounded_box(draw, (qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
+                draw.rounded_rectangle((qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
                 img.paste(qr_img, (qr_x+10, qr_y+10))
-            
+                
+                msg = "기사 원문 보러가기"
+                bbox3 = draw.textbbox((0, 0), msg, font=font_small)
+                w3 = bbox3[2] - bbox3[0]
+                draw.text(((1080-w3)/2, 910), msg, font=font_small, fill=out_color)
+
             generated_images.append(img)
             with tabs[i]: st.image(img)
 
@@ -403,6 +432,6 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
                 zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
         
         st.success("✅ 제작 완료! 아래 버튼을 눌러 다운로드하세요.")
-        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_final.zip", "application/zip", use_container_width=True)
+        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_polished.zip", "application/zip", use_container_width=True)
 
     except Exception as e: st.error(f"이미지 생성 중 오류 발생: {e}")
