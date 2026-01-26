@@ -14,11 +14,11 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News Final", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (Final Auto-Connect)")
-st.markdown("### 💎 모델 자동 탐색 및 연결 시스템 (404 에러 원천 봉쇄)")
+st.set_page_config(page_title="One-Click News v10.3", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (Final Production)")
+st.markdown("### 💎 로고/본문/모델 연결 완벽 수정 버전")
 
-# --- [설정] 자산 파일명 ---
+# --- [설정] 서버 파일명 (자동 로드용) ---
 ASSET_FILENAMES = {
     "symbol": "segye_symbol.png",
     "text": "segye_text.png",
@@ -59,38 +59,16 @@ def load_logo_image(uploader, filename, width_target):
         return img.resize((width_target, int(width_target * ar)))
     except: return None
 
-# --- [핵심] 사용 가능한 모델 자동 사냥 함수 ---
-def get_working_model():
-    """
-    API 키로 접근 가능한 모델 목록을 조회해서,
-    가장 먼저 잡히는 '텍스트 생성 가능' 모델을 반환합니다.
-    """
+# --- [핵심] 모델 자동 탐색 ---
+def get_available_model():
     try:
-        available_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        # 선호 순위 (최신 -> 구형)
-        preferred_order = [
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-pro",
-            "models/gemini-1.0-pro",
-            "models/gemini-pro"
-        ]
-        
-        # 1. 선호하는 모델이 목록에 있으면 그거 씀
-        for pref in preferred_order:
-            if pref in available_models:
-                return pref
-        
-        # 2. 없으면 목록에 있는 아무거나 씀 (최신순)
-        if available_models:
-            return available_models[0]
-            
-        return None
-    except Exception as e:
-        return None
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        priorities = ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-1.0-pro", "models/gemini-pro"]
+        for p in priorities:
+            for m in models:
+                if p in m: return m
+        return models[0] if models else "models/gemini-pro"
+    except: return "models/gemini-pro"
 
 # --- 디자인 유틸리티 ---
 def validate_hex_color(color_str):
@@ -200,11 +178,9 @@ with st.sidebar:
     api_key = st.text_input("Google API Key", type="password")
     if api_key: genai.configure(api_key=api_key)
     st.markdown("---")
+    user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
     
-    st.markdown("#### 1. 필수 이미지")
-    user_image = st.file_uploader("기사 배경 사진 (JPG/PNG)", type=['png', 'jpg', 'jpeg'])
-    
-    st.markdown("#### 2. 로고 설정")
+    st.markdown("#### 🎨 로고 & 폰트")
     st.caption("※ 폴더에 파일이 있으면 자동 적용, 없으면 아래 업로드")
     symbol_file = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
     text_logo_file = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
@@ -221,25 +197,16 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
     if not api_key: st.error("API Key를 입력해주세요."); st.stop()
     if not url: st.error("URL을 입력해주세요."); st.stop()
     
-    # 1. 기사 분석
     status = st.empty()
-    status.info("📰 기사 내용을 읽고 있습니다...")
+    status.info("📰 기사 분석 중...")
     title, text, img_url = advanced_scrape(url)
-    
-    if len(text) < 50:
-        st.error("기사 본문을 가져오지 못했습니다. URL을 확인해주세요.")
-        st.stop()
+    if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # 2. AI 기획 (자동 연결 시스템)
+    # --- AI 기획 ---
     try:
-        # [핵심] 사용 가능한 모델 자동 탐색
-        target_model_name = get_working_model()
-        if not target_model_name:
-            st.error("❌ 사용 가능한 AI 모델을 찾을 수 없습니다. (API Key 권한 확인 필요)")
-            st.stop()
-            
-        status.info(f"🤖 AI 모델({target_model_name})에 연결했습니다. 기획 중...")
-        model = genai.GenerativeModel(target_model_name)
+        model_name = get_available_model()
+        status.info(f"🤖 AI 모델({model_name})에 연결했습니다. 기획 중...")
+        model = genai.GenerativeModel(model_name)
         
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -282,47 +249,38 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
         response = model.generate_content(prompt, safety_settings=safety_settings)
         res_text = response.text
         
-        # 파싱 로직 (특수문자 제거 강화)
         slides = []
         current_slide = {}
         color_main = "#FFD700"
         
-        lines = res_text.split('\n')
-        for line in lines:
+        for line in res_text.split('\n'):
             line = line.strip()
             if not line: continue
-            
             clean_line = line.replace('*', '').replace('#', '').strip()
             
             if "COLOR_MAIN" in clean_line:
                 parts = clean_line.split(":")
                 if len(parts) > 1: color_main = validate_hex_color(parts[1].strip())
-            
             elif "[SLIDE" in clean_line:
                 if current_slide: slides.append(current_slide)
                 current_slide = {"HEAD": "", "DESC": "", "TYPE": "CONTENT"}
-            
             elif "TYPE:" in clean_line:
                 current_slide["TYPE"] = clean_line.split(":", 1)[1].strip()
             elif "HEAD:" in clean_line:
                 current_slide["HEAD"] = clean_line.split(":", 1)[1].strip()
             elif "DESC:" in clean_line:
                 current_slide["DESC"] = clean_line.split(":", 1)[1].strip()
-                
         if current_slide: slides.append(current_slide)
         
         while len(slides) < 8:
             slides.append({"TYPE": "CONTENT", "HEAD": "내용 없음", "DESC": "AI 생성 오류로 내용이 누락되었습니다."})
             
-    except Exception as e:
-        st.error(f"AI 기획 실패: {e}")
-        st.stop()
+    except Exception as e: st.error(f"AI 기획 실패: {e}"); st.stop()
 
-    # 3. 이미지 생성
+    # --- 이미지 생성 ---
     status.info("🎨 이미지를 렌더링하고 있습니다...")
     try:
         web_fonts = get_web_resources()
-        # [안전 장치] 폰트 로드 실패 시 에러 방지
         def safe_font(font_bytes, size):
             try: return ImageFont.truetype(io.BytesIO(font_bytes), size)
             except: return ImageFont.load_default()
@@ -355,7 +313,6 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
         
         generated_images = []
         tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
-        
         title_color = "#FFFFFF" if is_color_dark(color_main) else color_main
         
         for i, slide in enumerate(slides):
@@ -420,7 +377,7 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
                 qr_img = generate_qr_code(url).resize((220, 220))
                 qr_x = (1080 - 240) // 2
                 qr_y = 650
-                draw.rounded_rectangle((qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
+                draw_rounded_box(draw, (qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
                 img.paste(qr_img, (qr_x+10, qr_y+10))
             
             generated_images.append(img)
@@ -434,7 +391,6 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
                 zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
         
         st.success("✅ 제작 완료! 아래 버튼을 눌러 다운로드하세요.")
-        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_auto_final.zip", "application/zip", use_container_width=True)
+        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_final.zip", "application/zip", use_container_width=True)
 
-    except Exception as e:
-        st.error(f"이미지 생성 중 오류 발생: {e}")
+    except Exception as e: st.error(f"이미지 생성 중 오류 발생: {e}")
