@@ -14,25 +14,35 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v13.8", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v13.9", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
 LOGO_TEXT_PATH = "segye_text.png"
 
 # ==============================================================================
-# [3] 유틸리티 및 그리기 함수 정의 (에러 방지를 위해 최상단 배치)
+# [3] 유틸리티 및 그리기 함수
 # ==============================================================================
 
 def is_color_dark(hex_color):
-    """배경색이 어두운지 판별 (흰색 글씨 쓸지 검은색 글씨 쓸지 결정)"""
     try:
         hex_color = str(hex_color).lstrip('#')
         rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-        # 밝기 공식 (YIQ)
         return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) < 128
-    except:
-        return False # 기본적으로 밝다고 가정
+    except: return False
+
+def clean_text_spacing(text):
+    if not text: return ""
+    # 1. 기본적인 앞뒤 공백 제거
+    text = text.strip()
+    # 2. 마침표 뒤에 공백이 없으면 강제로 띄어쓰기 (단, 숫자 사이 소수점은 제외)
+    # 예: "했습니다.그러나" -> "했습니다. 그러나"
+    text = re.sub(r'(?<=[가-힣])\.(?=[가-힣a-zA-Z])', '. ', text)
+    # 3. 쉼표 뒤 공백
+    text = re.sub(r'(?<=[가-힣])\,(?=[가-힣a-zA-Z])', ', ', text)
+    # 4. 다중 공백 제거
+    text = re.sub(r'\s+', ' ', text)
+    return text
 
 def extract_tag_from_title(title):
     match = re.search(r'\[(.*?)\]', title)
@@ -138,12 +148,6 @@ def get_available_model():
         return models[0] if models else "models/gemini-pro"
     except: return "models/gemini-pro"
 
-def clean_text_spacing(text):
-    if not text: return ""
-    text = re.sub(r'\s*\.\s*', '.', text)
-    text = re.sub(r'\s*\,', ',', text)
-    return text.strip()
-
 def validate_hex_color(c):
     match = re.search(r'#(?:[0-9a-fA-F]{3}){1,2}', str(c))
     return match.group(0) if match else "#FFD700"
@@ -166,29 +170,65 @@ def draw_pill_badge(draw, x, y, text, font, bg_color="#C80000"):
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
-    
     h = text_h + padding_y * 2
     w = text_w + padding_x * 2
-    
     draw.ellipse((x, y, x+h, y+h), fill=bg_color) 
     draw.ellipse((x+w-h, y, x+w, y+h), fill=bg_color)
     draw.rectangle((x+h//2, y, x+w-h//2, y+h), fill=bg_color)
-    
+    # 텍스트 높이 중앙 보정
     draw.text((x + padding_x, y + padding_y - 2), text, font=font, fill="white")
+
+# [수정] 제목 자동 리사이징 함수 (외톨이 글자 방지)
+def get_fitted_font(text, font_path, max_width, max_size=95, min_size=60):
+    size = max_size
+    while size >= min_size:
+        font = ImageFont.truetype(font_path, size)
+        # 캔버스에 가상의 텍스트를 그려서 너비 측정 (단순 길이 측정보다 정확)
+        # 하지만 여기서는 간단히 textlength 사용
+        try:
+            # Pillow 9.2.0+
+            length = font.getlength(text)
+        except:
+            length = len(text) * size # Fallback
+            
+        if length < max_width * 1.8: # 대략 2줄 이내로 들어오는지 체크
+            return font
+        size -= 5
+    return ImageFont.truetype(font_path, min_size)
 
 def wrap_text(text, font, max_width, draw):
     lines = []
     text = clean_text_spacing(text)
     if not text: return []
+    
     for para in text.split('\n'):
         if not para.strip(): continue
         words = para.split(' ')
-        current_line = words[0] # 변수명 통일
+        current_line = words[0]
         for word in words[1:]:
             bbox = draw.textbbox((0, 0), current_line + " " + word, font=font)
-            if bbox[2] - bbox[0] <= max_width: current_line += " " + word
-            else: lines.append(current_line); current_line = word
+            if bbox[2] - bbox[0] <= max_width:
+                current_line += " " + word
+            else:
+                lines.append(current_line)
+                current_line = word
         lines.append(current_line)
+    return lines
+
+# [NEW] 역피라미드형 줄바꿈 (뒷줄이 더 길게) - 커버용
+def wrap_text_inverted(text, font, max_width, draw):
+    # 일단 기본 wrap으로 나눈 뒤
+    lines = wrap_text(text, font, max_width, draw)
+    if len(lines) == 2:
+        # 두 줄인 경우, 첫 줄이 너무 길면 강제로 앞에서 끊어서 뒤로 보냄
+        full_text = lines[0] + " " + lines[1]
+        mid = len(full_text) // 2
+        # 중간보다 약간 앞에서 공백 찾기
+        split_idx = full_text.rfind(' ', 0, mid)
+        if split_idx != -1:
+            line1 = full_text[:split_idx]
+            line2 = full_text[split_idx+1:]
+            return [line1, line2]
     return lines
 
 def generate_qr_code(link):
@@ -226,41 +266,24 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v13.8 Final Integrity Fix)")
+st.title("📰 One-Click News (v13.9 Detail Polish)")
 
-# 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
-
-# 2. 실행 버튼
 run_button = st.button("🚀 카드뉴스 제작")
-
-# 3. 결과 컨테이너
 result_container = st.container()
 
-# 4. 상세 안내문
 st.markdown("---")
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Full Spec)", expanded=True):
+with st.expander("💡 [안내] 기능 명세 (v13.9 Updated)", expanded=True):
     st.markdown("""
-    이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI(Gemini Pro)** 기술을 결합하여, 기사의 맥락을 완벽하게 이해하고 시각화하는 **'지능형 콘텐츠 파트너'**입니다.
-
-    ### 🧠 1. Intelligence (맥락 인식 및 기획)
-    * **내러티브 구조화 (Narrative Arc):** 기사를 기계적으로 줄이지 않고, **'Hook(도입) - Content(전개) - Conclusion(결론)'**의 8단 서사 구조로 재구성하여 독자의 몰입을 유도합니다.
-    * **맥락 기반 레이아웃 결정 (Context-Aware Design):** AI가 문단의 성격을 스스로 분석합니다.
-        * **인용(Quote):** 인터뷰나 핵심 발언이 나오면 따옴표 디자인 적용.
-        * **데이터(Data):** 숫자나 통계가 핵심이면 인포그래픽(Big Number) 디자인 적용.
-        * **요약(Bar) / 서술(Box):** 내용의 호흡에 따라 최적의 레이아웃을 자동 선택합니다.
-    * **태그 자동 감지 (Smart Tagging):** 기사 제목의 `[단독]`, `[심층기획]` 등을 자동으로 인식하여, 로고 옆에 **전용 뱃지**를 부착합니다.
-
-    ### 🎨 2. Design Engine (미학적 완성도)
-    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 밝기를 자동으로 낮추고 텍스트에 **Deep Shadow & Stroke** 기술을 적용했습니다.
-    * **카멜레온 로고 (Adaptive Logo):** 배경이 어두우면 로고를 흰색으로, 밝으면 검은색으로 자동 변환하여 시인성을 확보합니다.
-    * **안전형 레이아웃 (Safe Layout):** 텍스트가 카드 밖으로 잘리지 않도록 **Top-Down** 방식의 배치 로직과 넉넉한 여백(Padding)을 적용했습니다.
-    * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 규격을 자유롭게 오갈 수 있습니다.
-
-    ### 🛡️ 3. Core Tech (안정성 및 편의성)
-    * **자동 자산 로드:** 로고와 전용 폰트를 서버에 내장하여, 매번 파일을 업로드하는 불편함을 없앴습니다.
-    * **멀티 이미지 스크래핑:** 기사 썸네일뿐만 아니라 본문의 모든 이미지를 수집하여, 슬라이드마다 다채로운 배경을 제공합니다.
-    * **Visual SEO:** 인스타그램 유입을 극대화하기 위해 기사 내용에 최적화된 **해시태그**를 자동 생성합니다.
+    ### 🎨 디자인 및 가독성 개선
+    * **[단독] 뱃지 정렬:** 로고 텍스트 높이의 정중앙을 계산하여 완벽한 수평 배치.
+    * **역피라미드 커버:** 제목이 두 줄일 때, 윗줄을 짧게 하고 아랫줄을 길게 배치하여 시각적 안정감 유도.
+    * **자동 띄어쓰기:** 마침표 뒤에 공백이 없는 문장(`~다.그러나`)을 자동으로 교정(`~다. 그러나`).
+    * **제목 최적화:** '씨' 같은 외톨이 글자가 발생하지 않도록 제목 폰트 크기를 자동 조절.
+    
+    ### 📝 콘텐츠 품질
+    * **본문 분량 확대:** 3~4줄(120자 내외)로 늘려 내용 전달력 강화.
+    * **인용구 최적화:** 인용형(QUOTE) 레이아웃에서는 제목의 따옴표를 자동 제거하여 중복 방지.
     """)
 
 # ==============================================================================
@@ -299,26 +322,20 @@ if run_button:
             model = genai.GenerativeModel(model_name)
             
             prompt = f"""
-            당신은 세계일보 전문 에디터입니다. 기사를 SNS용 카드뉴스 8장으로 기획하세요.
+            당신은 세계일보 전문 에디터입니다. 기사를 읽고 SNS용 카드뉴스 8장을 기획하세요.
             [제목] {title}
             [내용] {text[:4000]}
             
-            [레이아웃 결정 규칙]
-            1. **TYPE: QUOTE** (인용/발언)
-            2. **TYPE: DATA** (숫자/통계)
-            3. **TYPE: BAR** (요약/명제)
-            4. **TYPE: BOX** (일반 서술)
-            
             [필수 규칙]
-            1. **SLIDE 1 (COVER):** HEAD는 15자 이내 훅, DESC는 40자 이내.
-            2. **SLIDE 2~7 (CONTENT):** 각 장의 DESC(본문)는 **80자 내외로 작성**. (절대 길게 쓰지 말 것, 박스 넘침 방지)
-            3. **SLIDE 8 (OUTRO):** 고정.
-            4. 해시태그 5개 추천.
+            1. **SLIDE 1 (COVER):** HEAD는 15자 이내, DESC는 40자 이내.
+            2. **SLIDE 2~7 (CONTENT):** 각 장의 DESC(본문)는 **120자~150자(3~4줄)로 충실하게 작성**. 너무 짧으면 안 됨.
+            3. 기사에 숫자가 핵심이라면 TYPE을 'DATA'로 지정.
+            4. **TYPE: QUOTE**일 경우 HEAD에 따옴표를 넣지 말 것.
+            5. 해시태그 5개 추천.
             
             [출력형식]
             COLOR_MAIN: #Hex
             HASHTAGS: #태그
-            
             [SLIDE 1]
             TYPE: COVER
             HEAD: ...
@@ -373,7 +390,8 @@ if run_button:
                 try: return ImageFont.truetype(path, size)
                 except: return ImageFont.load_default()
 
-            f_title = safe_font(font_paths['title'], 95)
+            # 폰트 로드
+            f_title_base = safe_font(font_paths['title'], 95) # 기본 제목 폰트
             f_body = safe_font(font_paths['body'], 48)
             f_small = safe_font(font_paths['body'], 30)
             f_serif = safe_font(font_paths['serif'], 90)
@@ -405,6 +423,7 @@ if run_button:
             for i, slide in enumerate(slides):
                 sType = slide.get('TYPE', 'BOX').upper()
                 
+                # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
                 else:
                     base = img_pool[i % len(img_pool)].copy().resize((CANVAS_W, CANVAS_H))
@@ -431,26 +450,35 @@ if run_button:
                         draw.text((60, top_y), "SEGYE BRIEFING", font=f_small, fill=color_main)
                         next_x = 320
 
+                    # [수정] 뱃지 수직 중앙 정렬
                     if news_tag:
-                        badge_y = top_y + (logo_height // 2) - 25 
+                        # 뱃지 높이(폰트35 + 패딩12 = 47px)
+                        badge_h = 47 
+                        # 로고 중앙 Y = top_y + (logo_height / 2)
+                        badge_y = top_y + (logo_height // 2) - (badge_h // 2)
                         draw_pill_badge(draw, next_x, badge_y, news_tag, f_badge, bg_color="#C80000")
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
-                # 내용 그리기 (여백 100px)
+                # 내용 그리기
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
-                content_width = CANVAS_W - 200 
+                content_width = CANVAS_W - 240 # 여백 120
                 
+                # [수정] 제목 폰트 크기 자동 조절 (외톨이 글자 방지)
+                f_title = get_fitted_font(head, font_paths['title'], content_width)
+
                 if sType == 'COVER':
-                    d_lines = wrap_text(desc, f_body, content_width, draw)
+                    # [수정] 역피라미드 줄바꿈 적용
+                    d_lines = wrap_text_inverted(desc, f_body, content_width, draw)
                     curr_y = CANVAS_H - 150 - (len(d_lines)*60)
                     for l in d_lines:
                         draw_text_with_stroke(draw, (60, curr_y), l, f_body, stroke_width=2)
                         curr_y += 60
                     curr_y -= (len(d_lines)*60 + 40)
                     draw.rectangle([(60, curr_y), (160, curr_y+10)], fill=color_main)
-                    h_lines = wrap_text(head, f_title, content_width, draw)
+                    
+                    h_lines = wrap_text_inverted(head, f_title, content_width, draw)
                     curr_y -= (len(h_lines)*110 + 20)
                     for l in h_lines:
                         draw_text_with_stroke(draw, (60, curr_y), l, f_title, stroke_width=3)
@@ -468,8 +496,11 @@ if run_button:
                         curr_y += 60
 
                 elif sType == 'QUOTE':
+                    # [수정] 제목에서 따옴표 제거
+                    head = head.replace('"', '').replace("'", "")
                     start_y = 250 if not is_story else 350
                     draw.text((80, start_y - 120), "“", font=f_quote, fill=(255,255,255,70))
+                    
                     h_lines = wrap_text(head, f_title, content_width, draw)
                     for l in h_lines:
                         draw_text_with_stroke(draw, (150, start_y), l, f_title, stroke_width=3)
@@ -534,6 +565,7 @@ if run_button:
                 generated_images.append(img)
                 with tabs[i]: st.image(img)
 
+            # 다운로드
             zip_buf = io.BytesIO()
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for i, img in enumerate(generated_images):
