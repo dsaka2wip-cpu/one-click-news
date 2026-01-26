@@ -3,27 +3,50 @@ import google.generativeai as genai
 from newspaper import Article, Config
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from io import BytesIO
 import re
 import random
-import zipfile # ★ 압축 기능을 위한 모듈 추가
+import zipfile
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v3.5", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v3.5 Bulk Download)")
-st.markdown("### 🌊 4~8장 자동 생성 + 💾 전체 다운로드 기능 탑재")
+st.set_page_config(page_title="One-Click News v4.0", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v4.0 Magazine Edition)")
+st.markdown("### 💎 품격 있는 '매거진 스타일' 디자인 시스템 적용")
 
-# --- 폰트 준비 ---
+# --- 폰트 준비 (고딕 & 명조 믹스매치) ---
 @st.cache_resource
 def get_fonts():
     fonts = {}
     try:
+        # 제목용 (강렬함): Black Han Sans
         fonts['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf", timeout=10).content
+        # 본문용 (가독성): Nanum Gothic Bold
         fonts['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
+        # 엔딩/인용구용 (감성/명조): Nanum Myeongjo ExtraBold
         fonts['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
     except: return None
     return fonts
+
+# --- 디자인 유틸리티 함수 (핵심 업그레이드) ---
+
+# 1. 시네마틱 그라데이션 생성
+def create_gradient_overlay(width, height, top_opacity=20, bottom_opacity=230):
+    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for y in range(height):
+        # 선형 보간 (Linear Interpolation)
+        alpha = int(top_opacity + (bottom_opacity - top_opacity) * (y / height))
+        draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+    return overlay
+
+# 2. 텍스트 그림자 효과 (가독성 끝판왕)
+def draw_text_with_shadow(draw, position, text, font, text_color="white", shadow_color="black", shadow_offset=(3, 3)):
+    x, y = position
+    # 그림자 먼저 그리기
+    draw.text((x + shadow_offset[0], y + shadow_offset[1]), text, font=font, fill=shadow_color)
+    # 본문 그리기
+    draw.text((x, y), text, font=font, fill=text_color)
 
 # --- 스크래핑 엔진 ---
 def advanced_scrape(url):
@@ -52,17 +75,10 @@ def advanced_scrape(url):
         except: pass
     return title, text, top_image
 
-# --- 이미지 라이브러리 ---
+# --- 기본 유틸리티 ---
 def get_fallback_image(keyword):
-    keyword = keyword.lower().strip()
-    library = {
-        "politics": ["https://images.unsplash.com/photo-1555848962-6e79363ec58f?q=80&w=1000"],
-        "news": ["https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000"]
-    }
-    abstract_backgrounds = ["https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?q=80&w=1000"]
-    for key, urls in library.items():
-        if key in keyword: return random.choice(urls)
-    return random.choice(abstract_backgrounds)
+    # (백업용 이미지 로직 유지)
+    return "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000"
 
 def clean_text_strict(text):
     text = re.sub(r'\[.*?\]', '', text)
@@ -93,7 +109,7 @@ with st.sidebar:
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
-if st.button("🚀 카드뉴스 제작 시작"):
+if st.button("🚀 매거진 스타일 제작"):
     if not api_key or not url: st.error("설정 확인 필요"); st.stop()
     
     status = st.empty()
@@ -102,45 +118,43 @@ if st.button("🚀 카드뉴스 제작 시작"):
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- [AI 프롬프트: 4~8장 규칙] ---
+    # --- [AI 프롬프트: 매거진 스타일 기획] ---
     try:
-        status.info("🧠 AI가 기사 호흡을 4~8장으로 최적화합니다...")
+        status.info("🧠 AI가 매거진 스타일로 기획 중입니다...")
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         prompt = f"""
-        당신은 세계일보의 '비주얼 뉴스 에디터'입니다.
-        독자가 '읽지 않고 보는' 직관적인 카드뉴스를 기획하세요.
+        당신은 세계일보의 '수석 아트 디렉터'입니다.
+        고급 매거진(TIME, Vogue) 스타일의 카드뉴스를 기획하세요.
         
         [기사 정보]
         제목: {title}
         내용: {text[:4000]}
         
         [필수 규칙]
-        1. **분량 결정:** 기사의 깊이와 중요도에 따라 **4~8장** 사이로 자동 결정하세요.
-           - 단순/속보 기사: 4장 (Hook -> 본문1,2 -> Outro)
-           - 일반/해설 기사: 5~6장
-           - 심층/기획 기사: 7~8장
-        2. **텍스트 제한:** 각 슬라이드 본문은 **최대 2문장, 60자 이내**로 짧게 압축하세요. (가독성 최우선)
-        3. **구성:** 기승전결(Hook -> Context -> Detail -> Conclusion -> Outro) 흐름을 유지하세요.
+        1. **분량:** 기사 깊이에 따라 **4~8장** 자동 결정.
+        2. **카피라이팅:** - 제목은 2줄 이내로 강렬하게.
+           - 본문은 **'대화하듯'** 자연스럽게 (최대 60자).
+           - 딱딱한 개조식(~함, ~음) 절대 금지.
+        3. **디자인 키워드:** 기사 분위기에 맞는 **포인트 컬러(Hex)** 하나만 추출. (무조건 쨍하고 밝은 색으로. 예: #FFD700, #00FFFF, #FF007F)
         
         [출력 양식]
         COLOR_MAIN: #Hex
         
         [SLIDE 1]
         TYPE: COVER
-        TEXT: [강렬한 제목]
-        SUB: [짧은 부제]
+        TEXT: [헤드라인]
+        SUB: [서브 카피]
         
         [SLIDE 2]
         TYPE: CONTENT
-        TEXT: [내용 1]
+        TEXT: [본문 내용]
         
-        ... (판단한 장수만큼 반복) ...
+        ...
         
         [SLIDE N]
         TYPE: OUTRO
         TEXT: First in, Last out
-        LOGO: 세상을 보는 눈, 세계일보
         """
         
         response = model.generate_content(prompt)
@@ -163,113 +177,127 @@ if st.button("🚀 카드뉴스 제작 시작"):
             elif line.startswith("SUB:"): current_slide["SUB"] = line.split("SUB:")[1].strip()
             
         if current_slide: slides.append(current_slide)
-        
-        status.success(f"✅ 기획 완료: 총 {len(slides)}장으로 구성됩니다.")
+        status.success(f"✅ 기획 완료: 총 {len(slides)}장")
         
     except Exception as e:
         st.error(f"기획 오류: {e}")
         st.stop()
 
-    # --- 이미지 준비 ---
+    # --- 이미지 및 디자인 소스 준비 ---
     try:
-        base_img = None
-        if user_image: 
-            base_img = Image.open(user_image)
+        # 1. 베이스 이미지 로드
+        if user_image: base_img = Image.open(user_image)
         elif img_url:
             headers = {'User-Agent': 'Mozilla/5.0'}
             base_img = Image.open(BytesIO(requests.get(img_url, headers=headers, timeout=5).content))
         else:
-            fallback_url = get_fallback_image("news")
-            base_img = Image.open(BytesIO(requests.get(fallback_url).content))
+            base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
             
-        base_img = base_img.resize((1080, 1080))
-        base_img = base_img.filter(ImageFilter.GaussianBlur(5)) 
-        overlay = Image.new('RGBA', (1080, 1080), (0, 0, 0, 180)) 
-        bg_final = Image.alpha_composite(base_img.convert('RGBA'), overlay)
+        base_img = base_img.convert('RGB').resize((1080, 1080))
+        
+        # 2. 이미지 톤 보정 (약간 어둡고 차분하게 -> 글자 강조)
+        enhancer = ImageEnhance.Brightness(base_img)
+        base_img = enhancer.enhance(0.8) # 밝기 80%로 낮춤
+        
+        # 3. 그라데이션 오버레이 생성 (상단 투명 -> 하단 블랙)
+        gradient = create_gradient_overlay(1080, 1080, top_opacity=30, bottom_opacity=240)
+        
+        # 4. 최종 배경 합성
+        bg_final = Image.alpha_composite(base_img.convert('RGBA'), gradient)
         
     except:
-        base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
+        base_img = Image.new('RGB', (1080, 1080), color='#000000')
         bg_final = base_img
 
     # --- 렌더링 루프 ---
     fonts = get_fonts()
     if not fonts: st.error("폰트 로딩 실패"); st.stop()
     
-    st.markdown(f"### 📸 총 {len(slides)}장의 카드뉴스가 생성되었습니다.")
-
-    # [저장용 리스트]
+    st.markdown(f"### 📸 Magazine Edition ({len(slides)} Pages)")
     generated_images = []
-    
-    # 탭 생성
-    tab_names = [f"{i+1}면" for i in range(len(slides))]
-    tabs = st.tabs(tab_names)
+    tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
     
     for i, slide in enumerate(slides):
         img = bg_final.copy()
         draw = ImageDraw.Draw(img)
         
-        font_cover_title = ImageFont.truetype(BytesIO(fonts['title']), 90)
-        font_cover_sub = ImageFont.truetype(BytesIO(fonts['body']), 50)
-        font_content = ImageFont.truetype(BytesIO(fonts['body']), 65) 
-        font_outro_slogan = ImageFont.truetype(BytesIO(fonts['serif']), 80)
-        font_outro_brand = ImageFont.truetype(BytesIO(fonts['body']), 40)
+        # 폰트 설정 (계층 구조 명확화)
+        font_headline = ImageFont.truetype(BytesIO(fonts['title']), 100) # 더 키움
+        font_sub = ImageFont.truetype(BytesIO(fonts['body']), 45)
+        font_body = ImageFont.truetype(BytesIO(fonts['body']), 60)
+        font_serif_big = ImageFont.truetype(BytesIO(fonts['serif']), 90) # 명조체
+        font_tag = ImageFont.truetype(BytesIO(fonts['body']), 35)
         
+        # [SLIDE 1: COVER] - 압도적인 타이포그래피
         if slide.get("TYPE") == "COVER":
-            draw.text((60, 80), "SEGYE BRIEFING", font=font_outro_brand, fill=color_main)
+            # 1. 브랜드 태그 (좌측 상단, 박스형)
+            draw.rectangle([(50, 60), (350, 120)], fill=color_main)
+            draw.text((70, 72), "SEGYE BRIEFING", font=font_tag, fill="black")
+            
+            # 2. 메인 헤드라인 (좌측 하단 배치)
             title_text = slide.get("TEXT", "")
-            lines = wrap_text(title_text, font_cover_title, 960, draw)
-            start_y = 350
+            lines = wrap_text(title_text, font_headline, 980, draw)
+            
+            # 위치 계산 (하단에서 위로 쌓기)
+            start_y = 850 - (len(lines) * 110)
             for line in lines:
-                draw.text((60, start_y), line, font=font_cover_title, fill="white")
+                draw_text_with_shadow(draw, (60, start_y), line, font_headline, shadow_color="#000000")
                 start_y += 110
-            draw.line((60, start_y+20, 260, start_y+20), fill=color_main, width=12)
+            
+            # 3. 부제 (헤드라인 아래)
             if slide.get("SUB"):
-                draw.text((60, start_y+80), slide["SUB"], font=font_cover_sub, fill="#cccccc")
+                draw_text_with_shadow(draw, (60, start_y + 20), slide["SUB"], font_sub, text_color="#dddddd")
 
+        # [SLIDE 2~N: CONTENT] - 여백과 가독성
         elif slide.get("TYPE") == "CONTENT":
-            draw.text((950, 60), f"{i+1}", font=font_cover_sub, fill="#888888")
+            # 1. 페이지 번호 (우측 상단)
+            draw_text_with_shadow(draw, (950, 60), f"{i+1}", font_sub)
+            
+            # 2. 디자인 바 (좌측, 포인트 컬러)
+            draw.rectangle([(60, 250), (75, 400)], fill=color_main)
+            
+            # 3. 본문 텍스트 (좌측 정렬, 시각적 안정감)
             body_text = clean_text_strict(slide.get("TEXT", ""))
-            lines = wrap_text(body_text, font_content, 900, draw)
-            total_height = len(lines) * 90
-            start_y = (1080 - total_height) / 2 
+            lines = wrap_text(body_text, font_body, 900, draw)
+            
+            start_y = 250
             for line in lines:
-                draw.text((90, start_y), line, font=font_content, fill="white")
-                start_y += 90
-            bar_y_start = (1080 - total_height) / 2
-            draw.line((50, bar_y_start, 50, bar_y_start + total_height), fill=color_main, width=10)
+                draw_text_with_shadow(draw, (100, start_y), line, font_body)
+                start_y += 85
+            
+            # 4. 큰 따옴표 장식 (배경에 은은하게 깔기)
+            # 명조체 큰 따옴표를 투명도 줘서 그림
 
+        # [SLIDE LAST: OUTRO] - 여운이 남는 명조체 엔딩
         elif slide.get("TYPE") == "OUTRO":
+            # 중앙 정렬 계산
             slogan = "First in, Last out"
-            bbox = draw.textbbox((0, 0), slogan, font=font_outro_slogan)
-            w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text(((1080-w)/2, 450), slogan, font=font_outro_slogan, fill=color_main)
+            bbox = draw.textbbox((0, 0), slogan, font=font_serif_big)
+            w = bbox[2] - bbox[0]
+            
+            # 1. 슬로건 (명조체, 가운데)
+            draw_text_with_shadow(draw, ((1080-w)/2, 450), slogan, font=font_serif_big, text_color=color_main)
+            
+            # 2. 로고
             brand = "세상을 보는 눈, 세계일보"
-            bbox2 = draw.textbbox((0, 0), brand, font=font_outro_brand)
+            bbox2 = draw.textbbox((0, 0), brand, font=font_sub)
             w2 = bbox2[2] - bbox2[0]
-            draw.text(((1080-w2)/2, 580), brand, font=font_outro_brand, fill="white")
-            draw.line((440, 420, 640, 420), fill="white", width=3)
-            draw.line((440, 650, 640, 650), fill="white", width=3)
+            draw_text_with_shadow(draw, ((1080-w2)/2, 600), brand, font=font_sub)
+            
+            # 3. 얇은 라인 장식
+            draw.line((400, 420, 680, 420), fill="white", width=2)
+            draw.line((400, 680, 680, 680), fill="white", width=2)
 
-        # 리스트에 저장
         generated_images.append(img)
-        
-        # 탭에 표시
         with tabs[i]:
             st.image(img, caption=f"Page {i+1}")
 
-    # --- [전체 다운로드 버튼 생성] ---
+    # --- 다운로드 ---
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w") as zf:
         for i, img in enumerate(generated_images):
             img_byte_arr = BytesIO()
             img.save(img_byte_arr, format='PNG')
-            # 파일명: card_01.png, card_02.png ...
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
             
-    st.download_button(
-        label="💾 카드뉴스 전체 다운로드 (.zip)",
-        data=zip_buffer.getvalue(),
-        file_name="segye_cardnews.zip",
-        mime="application/zip",
-        use_container_width=True
-    )
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_magazine.zip", "application/zip", use_container_width=True)
