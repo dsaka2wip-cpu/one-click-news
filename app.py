@@ -3,33 +3,34 @@ import google.generativeai as genai
 from newspaper import Article, Config
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps
 from io import BytesIO
 import re
 import random
 import zipfile
+import qrcode # ★ QR코드 생성을 위한 라이브러리 (자동 설치됨)
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v4.1", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v4.1 Kind Magazine)")
-st.markdown("### 💎 [제목+설명] 2단 구조로 '친절하고 깊이 있는' 뉴스 생산")
+st.set_page_config(page_title="One-Click News v5.0", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v5.0 Pro Director Edition)")
+st.markdown("### 💎 QR코드 엔딩 & 브랜드 컬러 시스템 & 프로그레스 바 적용")
 
 # --- 폰트 준비 ---
 @st.cache_resource
 def get_fonts():
     fonts = {}
     try:
-        # 제목용 (강렬함): Black Han Sans
+        # 제목: Black Han Sans
         fonts['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf", timeout=10).content
-        # 본문용 (가독성): Nanum Gothic Bold
+        # 본문: Nanum Gothic Bold
         fonts['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
-        # 엔딩/명조 (감성): Nanum Myeongjo ExtraBold
+        # 명조(엔딩용): Nanum Myeongjo ExtraBold
         fonts['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
     except: return None
     return fonts
 
 # --- 디자인 유틸리티 ---
-def create_gradient_overlay(width, height, top_opacity=40, bottom_opacity=240):
+def create_gradient_overlay(width, height, top_opacity=30, bottom_opacity=220):
     overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     for y in range(height):
@@ -41,6 +42,19 @@ def draw_text_with_shadow(draw, position, text, font, text_color="white", shadow
     x, y = position
     draw.text((x + shadow_offset[0], y + shadow_offset[1]), text, font=font, fill=shadow_color)
     draw.text((x, y), text, font=font, fill=text_color)
+
+# ★ QR 코드 생성 함수
+def generate_qr_code(link, box_size=10, border=2):
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=box_size,
+        border=border,
+    )
+    qr.add_data(link)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    return img
 
 # --- 스크래핑 엔진 ---
 def advanced_scrape(url):
@@ -98,34 +112,37 @@ with st.sidebar:
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
-if st.button("🚀 친절한 뉴스 만들기"):
+if st.button("🚀 프로급 카드뉴스 제작"):
     if not api_key or not url: st.error("설정 확인 필요"); st.stop()
     
     status = st.empty()
-    status.info("📰 기사를 정밀 분석 중입니다...")
+    status.info("📰 기사를 분석하고 디자인을 설계 중입니다...")
     
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- [AI 프롬프트 수정: 제목과 설명 분리] ---
+    # --- [AI 프롬프트: 색상 및 구조 기획] ---
     try:
-        status.info("🧠 AI가 제목과 본문을 나누어 '친절하게' 재구성 중입니다...")
+        status.info("🧠 AI가 테마 컬러를 선정하고 QR 코드를 생성합니다...")
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         prompt = f"""
-        당신은 세계일보의 '친절한 뉴스 에디터'입니다.
-        독자가 이미지만 보고도 내용을 완벽히 이해하도록 [키워드]와 [설명]을 분리해서 작성하세요.
+        당신은 세계일보의 '크리에이티브 디렉터'입니다.
         
-        [기사 정보]
+        [기사]
         제목: {title}
         내용: {text[:4000]}
         
-        [필수 규칙]
-        1. **분량:** 기사 깊이에 따라 **5~8장** 사이.
-        2. **구조 (엄수):**
-           - **HEAD:** 핵심 키워드나 짧은 제목 (15자 이내, 임팩트)
-           - **DESC:** 그 헤드라인이 무슨 뜻인지, 왜 중요한지 설명하는 문장 (2~3문장, 60~80자, 친절한 어투)
-        3. **디자인 키워드:** 기사 분위기에 맞는 **포인트 컬러(Hex)** 추출. (밝은 톤 권장)
+        [규칙]
+        1. **분량:** 5~8장 사이.
+        2. **구조:**
+           - HEAD: 15자 이내 핵심 제목
+           - DESC: 60자 이내 친절한 설명 (2~3문장)
+        3. **컬러 선정 (중요):** 기사 분위기에 맞는 **세련되고 짙은 단색(Solid Color)** 코드를 하나 뽑으세요. 
+           - 정치/무거움: #0f172a (Navy), #450a0a (Dark Red)
+           - 경제/신뢰: #1e3a8a (Royal Blue), #14532d (Dark Green)
+           - 사회/활기: #b45309 (Dark Orange), #7e22ce (Purple)
+           - 이 색상은 **마지막 장의 배경색**이자, **본문의 강조색**으로 쓰입니다.
         
         [출력 양식]
         COLOR_MAIN: #Hex
@@ -133,12 +150,12 @@ if st.button("🚀 친절한 뉴스 만들기"):
         [SLIDE 1]
         TYPE: COVER
         HEAD: [메인 제목]
-        DESC: [부제/요약]
+        DESC: [부제]
         
         [SLIDE 2]
         TYPE: CONTENT
-        HEAD: [핵심 키워드 1]
-        DESC: [상세 설명 1 (친절하게)]
+        HEAD: [키워드]
+        DESC: [설명]
         
         ...
         
@@ -153,7 +170,7 @@ if st.button("🚀 친절한 뉴스 만들기"):
         
         slides = []
         current_slide = {}
-        color_main = "#FFD700" 
+        color_main = "#1e3a8a" # Default Navy
         
         for line in res_text.split('\n'):
             line = line.strip()
@@ -168,7 +185,7 @@ if st.button("🚀 친절한 뉴스 만들기"):
             elif line.startswith("DESC:"): current_slide["DESC"] = line.split("DESC:")[1].strip()
             
         if current_slide: slides.append(current_slide)
-        status.success(f"✅ 기획 완료: 총 {len(slides)}장")
+        status.success(f"✅ 기획 완료: 총 {len(slides)}장 / 테마 컬러: {color_main}")
         
     except Exception as e:
         st.error(f"기획 오류: {e}")
@@ -176,6 +193,7 @@ if st.button("🚀 친절한 뉴스 만들기"):
 
     # --- 이미지 준비 ---
     try:
+        # 1. 메인 이미지 (표지~본문용)
         if user_image: base_img = Image.open(user_image)
         elif img_url:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -185,98 +203,133 @@ if st.button("🚀 친절한 뉴스 만들기"):
             
         base_img = base_img.convert('RGB').resize((1080, 1080))
         enhancer = ImageEnhance.Brightness(base_img)
-        base_img = enhancer.enhance(0.7) # 조금 더 어둡게 (글자 잘 보이게)
+        base_img = enhancer.enhance(0.7) 
         
-        gradient = create_gradient_overlay(1080, 1080, top_opacity=50, bottom_opacity=230)
-        bg_final = Image.alpha_composite(base_img.convert('RGBA'), gradient)
+        gradient = create_gradient_overlay(1080, 1080, top_opacity=40, bottom_opacity=230)
+        bg_content = Image.alpha_composite(base_img.convert('RGBA'), gradient)
         
+        # 2. 엔딩 배경 (브랜드 단색) - 색상이 안 맞을 경우 대비한 안전장치
+        try:
+            bg_outro = Image.new('RGB', (1080, 1080), color=color_main)
+        except:
+            bg_outro = Image.new('RGB', (1080, 1080), color='#1a1a2e')
+            color_main = '#FFD700' # 색상 오류시 골드로 대체
+            
     except:
-        base_img = Image.new('RGB', (1080, 1080), color='#000000')
-        bg_final = base_img
+        st.error("이미지 처리 실패")
+        st.stop()
 
-    # --- 렌더링 루프 (2단 레이아웃 적용) ---
+    # --- QR 코드 생성 ---
+    qr_img = generate_qr_code(url, box_size=10, border=1)
+    qr_img = qr_img.resize((200, 200)) # 사이즈 조정
+
+    # --- 렌더링 루프 ---
     fonts = get_fonts()
     if not fonts: st.error("폰트 로딩 실패"); st.stop()
     
-    st.markdown(f"### 📸 Magazine Edition ({len(slides)} Pages)")
+    st.markdown(f"### 📸 Pro Director Edition ({len(slides)} Pages)")
     generated_images = []
     tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
     
     for i, slide in enumerate(slides):
-        img = bg_final.copy()
+        # 배경 선택 (마지막 장은 단색, 나머지는 사진)
+        if slide.get("TYPE") == "OUTRO":
+            img = bg_outro.copy() # 단색 배경
+        else:
+            img = bg_content.copy() # 사진 배경
+            
         draw = ImageDraw.Draw(img)
         
         # 폰트
-        font_head = ImageFont.truetype(BytesIO(fonts['title']), 85) # 헤드라인
-        font_desc = ImageFont.truetype(BytesIO(fonts['body']), 48)  # 본문
-        font_serif = ImageFont.truetype(BytesIO(fonts['serif']), 90) # 엔딩용
-        font_small = ImageFont.truetype(BytesIO(fonts['body']), 30) # 페이지 번호
+        font_head = ImageFont.truetype(BytesIO(fonts['title']), 85)
+        font_desc = ImageFont.truetype(BytesIO(fonts['body']), 48)
+        font_serif = ImageFont.truetype(BytesIO(fonts['serif']), 90) # 슬로건용
+        font_small = ImageFont.truetype(BytesIO(fonts['body']), 30)
         
-        # 페이지 번호
-        draw_text_with_shadow(draw, (950, 60), f"{i+1}", font_small)
-
+        # [공통 디자인] 프로그레스 바 (상단)
+        progress_width = 1080 * ((i+1) / len(slides))
+        draw.rectangle([(0, 0), (progress_width, 15)], fill=color_main)
+        
         # [SLIDE 1: COVER]
         if slide.get("TYPE") == "COVER":
-            # 브랜드
+            # 브랜드 태그
             draw.rectangle([(50, 60), (350, 120)], fill=color_main)
-            draw.text((70, 72), "SEGYE BRIEFING", font=font_small, fill="black")
+            draw.text((70, 72), "SEGYE BRIEFING", font=font_small, fill="black" if color_main in ['#FFD700', '#00FFFF'] else "white")
             
-            # 헤드라인 (중앙 하단)
             head_text = slide.get("HEAD", "")
             lines = wrap_text(head_text, font_head, 960, draw)
             start_y = 600 - (len(lines) * 50)
             for line in lines:
-                draw_text_with_shadow(draw, (60, start_y), line, font_head, shadow_color="black")
+                draw_text_with_shadow(draw, (60, start_y), line, font_head)
                 start_y += 100
             
-            # 설명 (헤드라인 아래)
             if slide.get("DESC"):
                 desc_text = slide.get("DESC", "")
                 d_lines = wrap_text(desc_text, font_desc, 960, draw)
                 dy = start_y + 40
-                draw.line((60, dy, 260, dy), fill=color_main, width=8) # 구분선
+                draw.line((60, dy, 260, dy), fill=color_main, width=8) 
                 dy += 50
                 for line in d_lines:
                     draw_text_with_shadow(draw, (60, dy), line, font_desc, text_color="#eeeeee")
                     dy += 60
 
-        # [SLIDE 2~N: CONTENT] (2단 구조: 제목 + 설명)
+        # [SLIDE 2~N: CONTENT]
         elif slide.get("TYPE") == "CONTENT":
-            # 1. 헤드라인 (포인트 컬러) - 상단 배치
+            # 페이지 번호
+            draw_text_with_shadow(draw, (950, 60), f"{i+1}", font_small)
+            
+            # 1. 헤드라인 (포인트 컬러)
             head_text = slide.get("HEAD", "")
             lines = wrap_text(head_text, font_head, 900, draw)
-            start_y = 350
+            start_y = 300
             
-            # 좌측 세로 바
+            # 세로 바 (포인트 컬러)
             draw.rectangle([(60, start_y), (75, start_y + (len(lines)*100) + 20)], fill=color_main)
             
             for line in lines:
-                draw_text_with_shadow(draw, (90, start_y), line, font_head) # 흰색
+                draw_text_with_shadow(draw, (90, start_y), line, font_head)
                 start_y += 100
             
-            # 2. 설명 (본문) - 헤드라인 아래
+            # 2. 설명
             desc_text = clean_text_strict(slide.get("DESC", ""))
             d_lines = wrap_text(desc_text, font_desc, 900, draw)
-            
             dy = start_y + 40
             for line in d_lines:
                 draw_text_with_shadow(draw, (90, dy), line, font_desc, text_color="#dddddd")
                 dy += 65
 
-        # [SLIDE LAST: OUTRO]
+        # [SLIDE LAST: OUTRO] (완전히 다른 디자인)
         elif slide.get("TYPE") == "OUTRO":
+            # 1. 중앙 슬로건 (명조체)
             slogan = "First in, Last out"
             bbox = draw.textbbox((0, 0), slogan, font=font_serif)
             w = bbox[2] - bbox[0]
-            draw_text_with_shadow(draw, ((1080-w)/2, 450), slogan, font_serif, text_color=color_main)
+            # 배경이 단색이므로 그림자 없이 깔끔하게 흰색으로
+            draw.text(((1080-w)/2, 350), slogan, font=font_serif, fill="white")
             
+            # 2. 로고 텍스트
             brand = "세상을 보는 눈, 세계일보"
             bbox2 = draw.textbbox((0, 0), brand, font=font_desc)
             w2 = bbox2[2] - bbox2[0]
-            draw_text_with_shadow(draw, ((1080-w2)/2, 600), brand, font_desc)
+            draw.text(((1080-w2)/2, 480), brand, font=font_desc, fill="#dddddd")
             
-            draw.line((400, 420, 680, 420), fill="white", width=2)
-            draw.line((400, 680, 680, 680), fill="white", width=2)
+            # 3. 장식 라인
+            draw.line((350, 460, 730, 460), fill="white", width=2)
+            
+            # 4. QR 코드 부착 (하단 중앙)
+            # QR 코드 배경 박스 (흰색)
+            qr_bg_x = (1080 - 220) // 2
+            qr_bg_y = 650
+            draw.rectangle([(qr_bg_x, qr_bg_y), (qr_bg_x + 220, qr_bg_y + 220)], fill="white")
+            
+            # QR 코드 붙여넣기
+            img.paste(qr_img, (qr_bg_x + 10, qr_bg_y + 10))
+            
+            # 안내 문구
+            msg = "기사 원문 보러가기"
+            bbox3 = draw.textbbox((0, 0), msg, font=font_small)
+            w3 = bbox3[2] - bbox3[0]
+            draw.text(((1080-w3)/2, 900), msg, font=font_small, fill="white")
 
         generated_images.append(img)
         with tabs[i]:
@@ -290,4 +343,4 @@ if st.button("🚀 친절한 뉴스 만들기"):
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
             
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_magazine.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_pro_edition.zip", "application/zip", use_container_width=True)
