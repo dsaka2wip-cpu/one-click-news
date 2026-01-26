@@ -14,9 +14,9 @@ from datetime import datetime
 import numpy as np
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v8.0", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v8.1 Segae Identity)")
-st.markdown("### 💎 세계일보 CI & 글씨체 적용 (에러 수정판)")
+st.set_page_config(page_title="One-Click News v8.2", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v8.2 Final Fix)")
+st.markdown("### 💎 세계일보 CI & 글씨체 적용 (파싱 오류 수정완료)")
 
 # --- 리소스 캐싱 ---
 @st.cache_resource
@@ -250,8 +250,10 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         for line in res_text.split('\n'):
             line = line.strip()
             if not line: continue
+            
+            # [핵심 수정] "[SLIDE"가 포함되어 있으면 무조건 새 슬라이드로 인식
             if line.startswith("COLOR_MAIN:"): color_main = line.split(":")[1].strip()
-            elif line.startswith("[SLIDE"):
+            elif "[SLIDE" in line:
                 if current_slide: slides.append(current_slide)
                 current_slide = {"HEAD": "", "DESC": "", "TYPE": ""}
             elif line.startswith("TYPE:"): current_slide["TYPE"] = line.split(":")[1].strip()
@@ -452,4 +454,4 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
             img_byte_arr = BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_v9.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_v8_2.zip", "application/zip", use_container_width=True)
