@@ -117,6 +117,16 @@ def render_ai_to_image(ai_bytes):
     except:
         return None
 
+def render_font_preview(font_bytes, text, size=32, width=520, height=80):
+    try:
+        img = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.truetype(BytesIO(font_bytes), size)
+        draw.text((10, 18), text, font=font, fill="#111111")
+        return img
+    except:
+        return None
+
 # --- 스크래핑 엔진 ---
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
@@ -150,7 +160,9 @@ with st.sidebar:
     st.markdown("---")
     user_image = st.file_uploader("기사 사진 업로드 (1순위)", type=['png', 'jpg', 'jpeg'])
     logo_files = st.file_uploader("세계일보 로고/CI (PNG/JPG/AI)", type=['png', 'jpg', 'jpeg', 'ai'], accept_multiple_files=True)
+    title_font_files = st.file_uploader("제목 폰트 업로드 (TTF/OTF)", type=['ttf', 'otf'], accept_multiple_files=True)
     body_font_files = st.file_uploader("본문 폰트 업로드 (TTF/OTF)", type=['ttf', 'otf'], accept_multiple_files=True)
+    serif_font_files = st.file_uploader("명조 폰트 업로드 (TTF/OTF)", type=['ttf', 'otf'], accept_multiple_files=True)
 
     selected_logo_file = None
     if logo_files:
@@ -158,13 +170,46 @@ with st.sidebar:
         selected_logo_name = st.selectbox("사용할 CI 선택", logo_names)
         selected_logo_file = next((f for f in logo_files if f.name == selected_logo_name), None)
 
-    font_options = ["기본(NanumGothic-Bold)"]
+    title_font_options = ["기본(BlackHanSans)"]
+    if title_font_files:
+        title_font_options += [f.name for f in title_font_files]
+    selected_title_font_name = st.selectbox("제목 폰트 선택", title_font_options)
+    selected_title_font_file = None
+    if selected_title_font_name != title_font_options[0] and title_font_files:
+        selected_title_font_file = next((f for f in title_font_files if f.name == selected_title_font_name), None)
+
+    body_font_options = ["기본(NanumGothic-Bold)"]
     if body_font_files:
-        font_options += [f.name for f in body_font_files]
-    selected_font_name = st.selectbox("본문 폰트 선택", font_options)
+        body_font_options += [f.name for f in body_font_files]
+    selected_font_name = st.selectbox("본문 폰트 선택", body_font_options)
     selected_font_file = None
-    if selected_font_name != font_options[0] and body_font_files:
+    if selected_font_name != body_font_options[0] and body_font_files:
         selected_font_file = next((f for f in body_font_files if f.name == selected_font_name), None)
+
+    serif_font_options = ["기본(NanumMyeongjo-ExtraBold)"]
+    if serif_font_files:
+        serif_font_options += [f.name for f in serif_font_files]
+    selected_serif_font_name = st.selectbox("명조 폰트 선택", serif_font_options)
+    selected_serif_font_file = None
+    if selected_serif_font_name != serif_font_options[0] and serif_font_files:
+        selected_serif_font_file = next((f for f in serif_font_files if f.name == selected_serif_font_name), None)
+
+    # Font previews
+    try:
+        title_preview_bytes = selected_title_font_file.getvalue() if selected_title_font_file else get_resources()['title']
+        body_preview_bytes = selected_font_file.getvalue() if selected_font_file else get_resources()['body']
+        serif_preview_bytes = selected_serif_font_file.getvalue() if selected_serif_font_file else get_resources()['serif']
+
+        st.markdown("#### 폰트 미리보기")
+        title_preview = render_font_preview(title_preview_bytes, "제목 미리보기: 세계일보 카드뉴스", size=34)
+        body_preview = render_font_preview(body_preview_bytes, "본문 미리보기: 세상을 보는 눈, 세계일보", size=28)
+        serif_preview = render_font_preview(serif_preview_bytes, "명조 미리보기: First in, Last out", size=30)
+
+        if title_preview: st.image(title_preview, use_container_width=True)
+        if body_preview: st.image(body_preview, use_container_width=True)
+        if serif_preview: st.image(serif_preview, use_container_width=True)
+    except:
+        st.caption("폰트 미리보기를 표시할 수 없습니다.")
 
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -299,10 +344,12 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         draw = ImageDraw.Draw(img)
         
         # 폰트
+        title_font_bytes = selected_title_font_file.getvalue() if selected_title_font_file else res['title']
         body_font_bytes = selected_font_file.getvalue() if selected_font_file else res['body']
-        f_head = ImageFont.truetype(BytesIO(res['title']), 95) # 더 키움
+        serif_font_bytes = selected_serif_font_file.getvalue() if selected_serif_font_file else res['serif']
+        f_head = ImageFont.truetype(BytesIO(title_font_bytes), 95) # 더 키움
         f_desc = ImageFont.truetype(BytesIO(body_font_bytes), 48)
-        f_serif = ImageFont.truetype(BytesIO(res['serif']), 90)
+        f_serif = ImageFont.truetype(BytesIO(serif_font_bytes), 90)
         f_small = ImageFont.truetype(BytesIO(body_font_bytes), 30)
         
         # [공통] CI 로고 삽입 (좌측 상단)
@@ -312,7 +359,7 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
             else:
                 # 로고 없으면 텍스트로 대체 (고급스러운 명조)
                 draw.text((50, 50), "세상을 보는 눈", font=f_small, fill="#FFD700")
-                draw.text((50, 90), "세계일보", font=ImageFont.truetype(BytesIO(res['title']), 50), fill="white")
+                draw.text((50, 90), "세계일보", font=ImageFont.truetype(BytesIO(title_font_bytes), 50), fill="white")
 
             # 페이지 번호 (우측 상단)
             draw.text((950, 60), f"{i+1} / {len(slides)}", font=f_small, fill="white")
