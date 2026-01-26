@@ -14,9 +14,9 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.7", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.7 Final Stable)")
-st.markdown("### 💎 모델 자동 우회(Fallback) 기능 탑재")
+st.set_page_config(page_title="One-Click News v9.8", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.8 Compatibility Mode)")
+st.markdown("### 💎 모델 호환성 강화 & 라이브러리 강제 업데이트")
 
 # --- 설정: 파일명 ---
 ASSET_FILENAMES = {
@@ -173,6 +173,7 @@ with st.sidebar:
     user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
     
     st.markdown("#### 🎨 로고 & 폰트")
+    st.caption("※ 폴더에 파일이 있으면 자동 적용됩니다.")
     symbol_file = st.file_uploader("세계일보 심볼", type=['png', 'ai'])
     text_logo_file = st.file_uploader("세계일보 텍스트로고", type=['png', 'ai'])
     
@@ -193,9 +194,8 @@ if st.button("🚀 카드뉴스 제작"):
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- AI 프롬프트 (자동 우회 로직 추가) ---
+    # --- AI 프롬프트 (3중 우회 로직) ---
     try:
-        # 안전 설정 (정치 허용)
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -224,23 +224,35 @@ if st.button("🚀 카드뉴스 제작"):
         DESC: 세상을 보는 눈, 세계일보
         """
 
-        # [핵심] 모델 우회 로직 (Try Flash -> Fail -> Try Pro)
         res_text = ""
+        # 1순위: 1.5-flash
         try:
-            # 1순위: 최신 모델
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt_text, safety_settings=safety_settings)
             res_text = response.text
-        except Exception as e1:
-            st.warning(f"⚠️ 최신 모델 연결 실패 ({e1}). 안정 모델(Pro)로 전환합니다...")
+        except:
+            # 2순위: 1.0-pro (구형 안정 모델)
             try:
-                # 2순위: 구형 안정 모델 (Gemini Pro)
-                model = genai.GenerativeModel('gemini-pro')
+                st.warning("⚠️ 최신 모델 연결 불안정. 안정 모델(1.0-Pro)로 전환합니다.")
+                model = genai.GenerativeModel('gemini-1.0-pro')
                 response = model.generate_content(prompt_text, safety_settings=safety_settings)
                 res_text = response.text
-            except Exception as e2:
-                st.error(f"❌ 모든 모델 생성 실패: {e2}")
-                st.stop()
+            except:
+                # 3순위: 그냥 'gemini-pro' (가장 기본)
+                try:
+                    model = genai.GenerativeModel('gemini-pro')
+                    response = model.generate_content(prompt_text, safety_settings=safety_settings)
+                    res_text = response.text
+                except Exception as e_final:
+                    st.error(f"❌ 모든 모델 생성 실패. API 키나 라이브러리 버전을 확인하세요. ({e_final})")
+                    # 사용 가능한 모델 목록 출력 (디버깅용)
+                    try:
+                        st.write("사용 가능한 모델 목록:")
+                        for m in genai.list_models():
+                            if 'generateContent' in m.supported_generation_methods:
+                                st.write(f"- {m.name}")
+                    except: pass
+                    st.stop()
         
         slides = []
         curr = {}
@@ -269,7 +281,7 @@ if st.button("🚀 카드뉴스 제작"):
         if curr: slides.append(curr)
         
         if not slides:
-            st.error("AI 응답을 파싱하지 못했습니다. (모델이 엉뚱한 답을 함)")
+            st.error("AI 응답을 파싱하지 못했습니다.")
             st.stop()
             
     except Exception as e:
@@ -435,4 +447,4 @@ if st.button("🚀 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_complete.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_stable.zip", "application/zip", use_container_width=True)
