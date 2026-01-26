@@ -14,9 +14,9 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.8", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.8 Compatibility Mode)")
-st.markdown("### 💎 모델 호환성 강화 & 라이브러리 강제 업데이트")
+st.set_page_config(page_title="One-Click News v9.9", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.9 Auto-Pilot)")
+st.markdown("### 💎 사용 가능한 최적 모델 자동 탐색 및 연결")
 
 # --- 설정: 파일명 ---
 ASSET_FILENAMES = {
@@ -58,6 +58,29 @@ def load_logo_image(uploader, filename, width_target):
         ar = img.height / img.width
         return img.resize((width_target, int(width_target * ar)))
     except: return None
+
+# --- [핵심] 사용 가능한 모델 자동 선택 함수 ---
+def get_best_model():
+    """현재 API 키로 사용 가능한 모델 중 최적의 모델을 찾아 반환"""
+    try:
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        # 우선순위: 2.0 Flash -> 1.5 Flash -> Pro -> 아무거나
+        for model in available_models:
+            if "gemini-2.0-flash" in model: return model
+        for model in available_models:
+            if "gemini-1.5-flash" in model: return model
+        for model in available_models:
+            if "gemini-pro" in model: return model
+            
+        if available_models:
+            return available_models[0] # 아무거나라도 반환
+        return None
+    except:
+        return "models/gemini-1.5-flash" # 최후의 수단
 
 # --- 디자인 유틸리티 ---
 def validate_hex_color(color_str):
@@ -194,8 +217,18 @@ if st.button("🚀 카드뉴스 제작"):
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- AI 프롬프트 (3중 우회 로직) ---
+    # --- AI 프롬프트 (오토 파일럿) ---
     try:
+        # [핵심] 사용 가능한 모델 자동 선택
+        target_model_name = get_best_model()
+        if not target_model_name:
+            st.error("사용 가능한 AI 모델을 찾을 수 없습니다. API Key 권한을 확인하세요.")
+            st.stop()
+            
+        status.info(f"🤖 AI 모델 연결: {target_model_name}")
+        model = genai.GenerativeModel(target_model_name)
+        
+        # 안전 설정
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -224,35 +257,8 @@ if st.button("🚀 카드뉴스 제작"):
         DESC: 세상을 보는 눈, 세계일보
         """
 
-        res_text = ""
-        # 1순위: 1.5-flash
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt_text, safety_settings=safety_settings)
-            res_text = response.text
-        except:
-            # 2순위: 1.0-pro (구형 안정 모델)
-            try:
-                st.warning("⚠️ 최신 모델 연결 불안정. 안정 모델(1.0-Pro)로 전환합니다.")
-                model = genai.GenerativeModel('gemini-1.0-pro')
-                response = model.generate_content(prompt_text, safety_settings=safety_settings)
-                res_text = response.text
-            except:
-                # 3순위: 그냥 'gemini-pro' (가장 기본)
-                try:
-                    model = genai.GenerativeModel('gemini-pro')
-                    response = model.generate_content(prompt_text, safety_settings=safety_settings)
-                    res_text = response.text
-                except Exception as e_final:
-                    st.error(f"❌ 모든 모델 생성 실패. API 키나 라이브러리 버전을 확인하세요. ({e_final})")
-                    # 사용 가능한 모델 목록 출력 (디버깅용)
-                    try:
-                        st.write("사용 가능한 모델 목록:")
-                        for m in genai.list_models():
-                            if 'generateContent' in m.supported_generation_methods:
-                                st.write(f"- {m.name}")
-                    except: pass
-                    st.stop()
+        response = model.generate_content(prompt_text, safety_settings=safety_settings)
+        res_text = response.text
         
         slides = []
         curr = {}
@@ -285,7 +291,7 @@ if st.button("🚀 카드뉴스 제작"):
             st.stop()
             
     except Exception as e:
-        st.error(f"시스템 에러: {e}")
+        st.error(f"AI 처리 중 오류 발생: {e}")
         st.stop()
 
     # --- 자산 로드 ---
@@ -447,4 +453,4 @@ if st.button("🚀 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_stable.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_autopilot.zip", "application/zip", use_container_width=True)
