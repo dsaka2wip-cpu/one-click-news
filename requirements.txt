@@ -6,5 +6,6 @@ beautifulsoup4
 Pillow
 pymupdf
 qrcode
+lxml>=5.2.0
 lxml_html_clean
 numpy
