@@ -14,7 +14,7 @@ import fitz  # PyMuPDF
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v11.6", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v12.0", page_icon="📰", layout="wide")
 
 # --- [2] 자산 파일명 설정 ---
 ASSET_FILENAMES = {
@@ -26,12 +26,14 @@ ASSET_FILENAMES = {
 }
 
 # ==============================================================================
-# [3] 함수 정의 구역 (Function Definitions) - 에러 방지를 위해 최상단 배치
+# [3] 함수 정의 구역
 # ==============================================================================
 
-# 3-1. 스크래핑 함수 (가장 먼저 정의)
+# 3-1. 스크래핑 함수 (이미지 다중 추출 기능 추가)
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
+    images = [] # 본문 이미지 리스트
+    
     try:
         config = Config()
         config.browser_user_agent = 'Mozilla/5.0'
@@ -39,7 +41,12 @@ def advanced_scrape(url):
         article = Article(url, config=config)
         article.download()
         article.parse()
-        title, text, top_image = article.title, article.text, article.top_image
+        
+        title = article.title
+        text = article.text
+        top_image = article.top_image
+        images = list(article.images) # 모든 이미지 가져오기
+        
     except: pass
     
     # 2차 시도 (BeautifulSoup)
@@ -48,12 +55,29 @@ def advanced_scrape(url):
             headers = {'User-Agent': 'Mozilla/5.0'}
             resp = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(resp.text, 'html.parser')
+            
             if not title: title = soup.find('title').text.strip()
-            meta = soup.find('meta', property='og:image')
-            if meta: top_image = meta['content']
+            if not top_image:
+                meta = soup.find('meta', property='og:image')
+                if meta: top_image = meta['content']
+            
             text = soup.get_text(separator=' ', strip=True)[:5000]
+            
+            # BS4로 이미지 찾기
+            for img in soup.find_all('img'):
+                src = img.get('src')
+                if src and src.startswith('http'):
+                    images.append(src)
+                    
         except: pass
-    return title, text, top_image
+    
+    # 이미지 리스트 정제 (너무 작은 아이콘, 광고 제거)
+    valid_images = [top_image] if top_image else []
+    for img in images:
+        if img not in valid_images and 'icon' not in img and 'logo' not in img:
+            valid_images.append(img)
+            
+    return title, text, valid_images
 
 # 3-2. 리소스 캐싱
 @st.cache_resource
@@ -143,10 +167,13 @@ def create_smooth_gradient(width, height):
             draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     return overlay
 
-def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color="black", offset=(2, 2)):
+# [수정] 그림자 강화 (가독성 UP)
+def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color="black", offset=(3, 3)):
     x, y = position
-    for ox in [-1, 1]:
-        for oy in [-1, 1]:
+    # 그림자를 굵게 여러 번 그려서 아웃라인 효과
+    for ox in [-2, 0, 2]:
+        for oy in [-2, 0, 2]:
+            if ox == 0 and oy == 0: continue
             draw.text((x+ox, y+oy), text, font=font, fill=shadow_color)
     draw.text((x, y), text, font=font, fill=fill)
 
@@ -210,7 +237,9 @@ with st.sidebar:
     st.markdown("---")
     
     st.markdown("#### 🎨 자산 설정")
-    user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
+    user_image = st.file_uploader("대표 이미지 (선택)", type=['png', 'jpg', 'jpeg'])
+    st.info("※ 업로드 안 하면 기사 본문의 사진들을 자동으로 가져와서 씁니다.")
+    
     use_auto_color = st.checkbox("📸 사진에서 테마 색상 자동 추출", value=True)
     
     up_symbol = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
@@ -222,49 +251,36 @@ with st.sidebar:
         up_font_serif = st.file_uploader("명조 폰트", type=['ttf', 'otf'])
 
 # ==============================================================================
-# [5] 메인 UI & 시스템 안내문
+# [5] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v11.6 Fix & Showcase)")
+st.title("📰 One-Click News (v12.0 Visual Context)")
 
-# [NEW] 시스템 소개 코너
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세", expanded=True):
+with st.expander("💡 [안내] 12.0 업데이트: 비주얼 컨텍스트 & SEO", expanded=False):
     st.markdown("""
-    이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI 기술**이 결합된 지능형 제작 도구입니다.
-    
-    ### 🧠 1. Intelligence (맥락 인식 기획)
-    * **내러티브 구조화:** 기사를 기계적으로 줄이지 않고, **'Hook(유입) - Content(전개) - Conclusion(결론)'**의 8단 구성으로 재창조합니다.
-    * **데이터 감지 (Big Number):** 기사 내 핵심 수치(%, 금액 등)가 감지되면, 이를 자동으로 포착하여 **인포그래픽(Data Visualization)** 슬라이드로 변환합니다.
-    * **모델 자동 우회 (Auto-Pilot):** 구글의 최신 AI 모델(Gemini 1.5 Flash)을 우선 사용하되, 연결이 불안정할 경우 자동으로 예비 모델로 전환하여 **실패 없는 제작**을 보장합니다.
-
-    ### 🎨 2. Design Engine (유동적 디자인)
-    * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 포맷을 즉시 전환하여 생성합니다.
-    * **지능형 컬러 피킹 (Auto Color):** 업로드된 보도사진의 **지배적인 색상(Dominant Color)**을 AI가 분석·추출하여, 사진과 가장 잘 어울리는 테마 컬러를 자동 적용합니다.
-    * **레이아웃 변주 시스템:** 텍스트 분량과 성격에 따라 **[박스형 / 바형 / 인용구형 / 빅넘버형]** 4가지 디자인을 유기적으로 섞어 지루함을 없앴습니다.
-
-    ### 🛡️ 3. Core Tech (안정성 & 디테일)
-    * **타이포그래피 교정:** `3 . 1절`과 같은 어색한 띄어쓰기나 문장 부호 오류를 **정규표현식(Regex)** 엔진이 자동으로 교정합니다.
-    * **하이브리드 로고 시스템:** 심볼과 텍스트 로고를 분리하여 인식하고, 배경의 밝기에 따라 최적의 위치에 배치합니다.
+    ### 🌟 New Features
+    1. **멀티 이미지 스크래핑:** 기사 본문에 있는 모든 사진을 긁어와서 슬라이드마다 다르게 배치합니다. (단조로움 해결)
+    2. **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 글자가 잘 보이도록 배경을 자동으로 어둡게 처리하고 그림자를 강화했습니다.
+    3. **AI 해시태그 생성:** 인스타그램 업로드 시 사용할 수 있는 최적의 해시태그를 자동 생성합니다.
     """)
 
 st.markdown("---")
-
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
 # ==============================================================================
-# [6] 메인 실행 로직 (Button Logic)
+# [6] 메인 실행 로직
 # ==============================================================================
 if st.button("🚀 카드뉴스 제작"):
     if not api_key: st.error("API Key를 입력해주세요."); st.stop()
     if not url: st.error("URL을 입력해주세요."); st.stop()
     
     status = st.empty()
-    status.info("📰 기사 분석 중...")
+    status.info("📰 기사 분석 및 이미지 수집 중...")
     
-    # 함수가 위에서 정의되었으므로 이제 안전하게 호출 가능
-    title, text, img_url = advanced_scrape(url)
+    # [수정] 이미지 리스트까지 반환받음
+    title, text, scraped_images = advanced_scrape(url)
     
     if len(text) < 50:
-        st.error("기사 본문을 가져오지 못했습니다. URL을 확인해주세요.")
+        st.error("기사 본문을 가져오지 못했습니다.")
         st.stop()
 
     # --- AI 기획 ---
@@ -280,6 +296,7 @@ if st.button("🚀 카드뉴스 제작"):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
+        # [수정] 해시태그 요청 추가
         prompt = f"""
         당신은 세계일보의 뉴스 에디터입니다. 기사를 읽고 카드뉴스 8장을 기획하세요.
         [기사 제목] {title}
@@ -288,22 +305,19 @@ if st.button("🚀 카드뉴스 제작"):
         [필수 규칙]
         1. 무조건 8장(슬라이드)으로 구성.
         2. 각 장의 DESC(본문)는 80자 내외로 충실하게.
-        3. **[중요] 기사에 숫자(%, 금액, 인원 등)가 핵심이라면 TYPE을 'DATA'로 지정하고 HEAD에 그 숫자만 적으세요.**
+        3. 기사에 숫자가 핵심이라면 TYPE을 'DATA'로 지정.
+        4. **마지막에 인스타그램용 해시태그 5개를 추천해주세요.**
         
         [출력 포맷]
         COLOR_MAIN: #HexCode
+        HASHTAGS: #태그1 #태그2 ...
         
         [SLIDE 1]
         TYPE: COVER
         HEAD: (제목)
         DESC: (요약)
         
-        [SLIDE 2]
-        TYPE: CONTENT (또는 DATA)
-        HEAD: (소제목 또는 숫자)
-        DESC: (내용)
-        
-        ... (3~7) ...
+        ... (중략) ...
         
         [SLIDE 8]
         TYPE: OUTRO
@@ -317,6 +331,7 @@ if st.button("🚀 카드뉴스 제작"):
         slides = []
         current_slide = {}
         ai_suggested_color = "#FFD700"
+        hashtags = ""
         
         for line in res_text.split('\n'):
             line = line.strip()
@@ -326,6 +341,10 @@ if st.button("🚀 카드뉴스 제작"):
             if "COLOR_MAIN" in clean_line:
                 parts = clean_line.split(":")
                 if len(parts) > 1: ai_suggested_color = validate_hex_color(parts[1].strip())
+            
+            elif "HASHTAGS" in clean_line:
+                hashtags = line.split(":", 1)[1].strip()
+
             elif "[SLIDE" in clean_line:
                 if current_slide: slides.append(current_slide)
                 current_slide = {"HEAD": "", "DESC": "", "TYPE": "CONTENT"}
@@ -350,7 +369,6 @@ if st.button("🚀 카드뉴스 제작"):
             try: return ImageFont.truetype(io.BytesIO(font_bytes), size)
             except: return ImageFont.load_default()
 
-        # [폰트 적용]
         font_title = safe_font(load_asset_bytes(up_font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 95)
         font_body = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 48)
         font_small = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 30)
@@ -360,28 +378,35 @@ if st.button("🚀 카드뉴스 제작"):
         img_symbol = load_logo_image(up_symbol, ASSET_FILENAMES['symbol'], 60)
         img_logotxt = load_logo_image(up_text_logo, ASSET_FILENAMES['text'], 160)
         
+        # [수정] 이미지 소스 결정 로직
+        # 1. 사용자가 업로드한 이미지가 최우선
+        # 2. 없으면 스크래핑한 이미지 리스트 사용
+        # 3. 그것도 없으면 기본 검정 배경
+        
+        final_images_pool = []
+        
         if user_image:
-            bg_raw = Image.open(user_image).convert('RGB')
-        elif img_url:
-            bg_raw = Image.open(io.BytesIO(requests.get(img_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5).content)).convert('RGB')
-        else:
-            bg_raw = Image.new('RGB', (1080, 1080), color='#333333')
-            
-        # 색상 결정
+            # 업로드 이미지를 풀에 추가
+            img_bytes = user_image.getvalue()
+            final_images_pool.append(Image.open(io.BytesIO(img_bytes)).convert('RGB'))
+        elif scraped_images:
+            # 스크래핑 이미지 다운로드하여 풀에 추가
+            for img_link in scraped_images[:5]: # 최대 5장만
+                try:
+                    resp = requests.get(img_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+                    final_images_pool.append(Image.open(io.BytesIO(resp.content)).convert('RGB'))
+                except: continue
+        
+        if not final_images_pool:
+            final_images_pool.append(Image.new('RGB', (1080, 1080), color='#333333'))
+
+        # 색상 결정 (첫 번째 이미지 기준)
         if use_auto_color:
-            color_main = get_dominant_color(bg_raw)
+            color_main = get_dominant_color(final_images_pool[0])
         else:
             color_main = ai_suggested_color
 
-        bg_raw = bg_raw.resize((CANVAS_W, CANVAS_H))
-        
-        bg_cover = bg_raw.copy()
-        grad = create_smooth_gradient(CANVAS_W, CANVAS_H)
-        bg_cover.paste(grad, (0,0), grad)
-        
-        bg_blur = bg_raw.copy().filter(ImageFilter.GaussianBlur(15))
-        bg_blur = ImageEnhance.Brightness(bg_blur).enhance(0.6)
-        
+        # 아웃트로 배경 미리 생성
         try: bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color=color_main)
         except: bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color='#333333')
         
@@ -394,10 +419,30 @@ if st.button("🚀 카드뉴스 제작"):
         
         for i, slide in enumerate(slides):
             sType = slide.get('TYPE', 'CONTENT')
-            if sType == 'COVER': img = bg_cover.copy()
-            elif sType == 'OUTRO': img = bg_outro.copy()
-            else: img = bg_blur.copy()
             
+            # [수정] 배경 이미지 순환 할당
+            # OUTRO는 단색, COVER는 첫 번째 이미지, 나머지는 순환
+            if sType == 'OUTRO':
+                img = bg_outro.copy()
+            else:
+                if sType == 'COVER':
+                    pool_idx = 0
+                else:
+                    pool_idx = i % len(final_images_pool)
+                
+                base_img = final_images_pool[pool_idx].copy().resize((CANVAS_W, CANVAS_H))
+                
+                # [수정] 가독성을 위한 Smart Dimming
+                if sType == 'COVER':
+                    # 커버는 하단 그라데이션만
+                    grad = create_smooth_gradient(CANVAS_W, CANVAS_H)
+                    base_img.paste(grad, (0,0), grad)
+                    img = base_img
+                else:
+                    # 본문은 전체적으로 어둡게 + 블러 (가독성 확보 핵심)
+                    img = base_img.filter(ImageFilter.GaussianBlur(15))
+                    img = ImageEnhance.Brightness(img).enhance(0.4) # 밝기 40%로 낮춤 (흰 글씨 잘 보이게)
+
             draw = ImageDraw.Draw(img, 'RGBA')
             
             # [공통] 로고
@@ -409,7 +454,6 @@ if st.button("🚀 카드뉴스 제작"):
                     draw.text((60, top_margin), "SEGYE BRIEFING", font=font_small, fill=color_main)
                 draw.text((CANVAS_W-130, top_margin), f"{i+1} / {len(slides)}", font=font_small, fill="white")
 
-            # [1] COVER
             if sType == 'COVER':
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
@@ -426,7 +470,6 @@ if st.button("🚀 카드뉴스 제작"):
                     draw_text_with_shadow(draw, (60, current_y), line, font_title, fill="white", offset=(4,4))
                     current_y += 110
 
-            # [NEW] DATA TYPE
             elif sType == 'DATA':
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
@@ -443,12 +486,10 @@ if st.button("🚀 카드뉴스 제작"):
                     draw_text_with_shadow(draw, ((CANVAS_W-lw)//2, desc_y), line, font_body)
                     desc_y += 60
 
-            # [2] CONTENT
             elif sType == 'CONTENT':
                 layout = layout_pattern[i % 3]
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
-                
                 h_lines = wrap_text(head, font_title, CANVAS_W-180, draw)
                 d_lines = wrap_text(desc, font_body, CANVAS_W-180, draw)
                 
@@ -489,7 +530,6 @@ if st.button("🚀 카드뉴스 제작"):
                         draw_text_with_shadow(draw, (150, start_y), line, font_body, fill="#cccccc")
                         start_y += 65
 
-            # [3] OUTRO
             elif sType == 'OUTRO':
                 out_color = "white" if is_color_dark(color_main) else "black"
                 slogan = "First in, Last out"
@@ -520,7 +560,10 @@ if st.button("🚀 카드뉴스 제작"):
                 img.save(img_byte_arr, format='PNG')
                 zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
         
-        st.success("✅ 제작 완료! 아래 버튼을 눌러 다운로드하세요.")
-        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_showcase.zip", "application/zip", use_container_width=True)
+        # [NEW] 해시태그 출력
+        st.success("✅ 제작 완료! 해시태그를 복사해서 쓰세요.")
+        st.code(hashtags, language="text")
+        
+        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_visual.zip", "application/zip", use_container_width=True)
 
     except Exception as e: st.error(f"이미지 생성 중 오류 발생: {e}")
