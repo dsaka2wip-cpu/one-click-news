@@ -14,41 +14,71 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.4", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.4 Color Safe)")
-st.markdown("### 💎 AI 색상 오류 방지 & 안전장치 탑재")
+st.set_page_config(page_title="One-Click News v9.5", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.5 Complete)")
+st.markdown("### 💎 로고 자동 적용 & 본문 누락 방지 로직 탑재")
 
-# --- 리소스 캐싱 ---
+# --- [설정] 서버에 올린 파일명과 일치해야 함 ---
+ASSET_FILENAMES = {
+    "symbol": "segye_symbol.png",
+    "text": "segye_text.png",
+    "font_title": "Title.ttf",
+    "font_body": "Body.ttf",
+    "font_serif": "Serif.ttf"
+}
+
+# --- 리소스 캐싱 (기본값) ---
 @st.cache_resource
-def get_resources():
+def get_web_resources():
     resources = {}
     try:
-        # 기본 폰트
+        # 파일이 없을 때를 대비한 구글 웹폰트
         resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf", timeout=10).content
         resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
         resources['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
     except: return None
     return resources
 
-# --- [NEW] 색상 검증 함수 (에러 방지 핵심) ---
-def validate_hex_color(color_str):
-    """
-    AI가 준 색상 코드가 유효한지 확인하고, 이상하면 기본값(#FFD700) 반환
-    """
+# --- [핵심] 만능 자산 로더 (우선순위: 업로드 > 로컬파일 > 웹/기본) ---
+def load_asset_bytes(uploader, filename, fallback_bytes=None):
+    # 1순위: 사용자가 방금 업로드한 파일
+    if uploader: 
+        return uploader.getvalue()
+    # 2순위: 깃허브(서버)에 올려둔 로컬 파일
+    if os.path.exists(filename):
+        with open(filename, "rb") as f: return f.read()
+    # 3순위: 비상용 기본값
+    return fallback_bytes
+
+def load_logo_image(uploader, filename, width_target):
+    data = load_asset_bytes(uploader, filename)
+    if not data: return None
+    
     try:
-        # 1. 텍스트에서 #XXXXXX 형태만 추출 (정규표현식)
+        # AI 파일 대응
+        if filename.lower().endswith('.ai') or (uploader and uploader.name.lower().endswith('.ai')):
+            doc = fitz.open(stream=data, filetype="pdf")
+            page = doc.load_page(0)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
+            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
+        else:
+            img = Image.open(io.BytesIO(data)).convert("RGBA")
+            
+        ar = img.height / img.width
+        return img.resize((width_target, int(width_target * ar)))
+    except: return None
+
+# --- 디자인 유틸리티 ---
+def validate_hex_color(color_str):
+    try:
         match = re.search(r'#(?:[0-9a-fA-F]{3}){1,2}', str(color_str))
         if match:
             hex_code = match.group(0)
-            # 2. PIL이 인식 가능한지 테스트
             ImageColor.getrgb(hex_code) 
             return hex_code
-        else:
-            return "#FFD700" # 추출 실패시 골드
-    except:
-        return "#FFD700" # 에러 발생시 골드
+        return "#FFD700"
+    except: return "#FFD700"
 
-# --- 디자인 유틸리티 ---
 def add_noise_texture(img, intensity=0.05):
     if img.mode != 'RGBA': img = img.convert('RGBA')
     width, height = img.size
@@ -98,14 +128,6 @@ def generate_qr_code(link):
     qr.add_data(link)
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white")
-
-def render_ai_to_image(ai_bytes):
-    try:
-        doc = fitz.open(stream=ai_bytes, filetype="pdf")
-        page = doc.load_page(0)
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
-        return Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
-    except: return None
 
 def is_color_dark(hex_color):
     try:
@@ -159,13 +181,16 @@ with st.sidebar:
     st.markdown("---")
     user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
     
-    st.markdown("#### 🎨 로고 & 폰트")
+    st.markdown("#### 🎨 로고 & 폰트 (고정 설정)")
+    st.caption("※ 폴더에 파일이 있으면 자동으로 적용됩니다. 필요시 아래에서 덮어쓸 수 있습니다.")
     symbol_file = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
     text_logo_file = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
     
-    font_title = st.file_uploader("제목 폰트 (Gmarket/BlackHanSans)", type=['ttf', 'otf'])
-    font_body = st.file_uploader("본문 폰트 (Noto/Gothic)", type=['ttf', 'otf'])
-    font_serif = st.file_uploader("명조 폰트 (Serif)", type=['ttf', 'otf'])
+    # 폰트 업로더 (숨김 처리 가능하지만 비상용으로 둠)
+    with st.expander("폰트 수동 변경"):
+        font_title = st.file_uploader("제목 폰트 (Gmarket/BlackHanSans)", type=['ttf', 'otf'])
+        font_body = st.file_uploader("본문 폰트 (Noto/Gothic)", type=['ttf', 'otf'])
+        font_serif = st.file_uploader("명조 폰트 (Serif)", type=['ttf', 'otf'])
 
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -184,22 +209,14 @@ if st.button("🚀 카드뉴스 제작"):
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         prompt = f"""
         당신은 세계일보의 '비주얼 에디터'입니다.
-        
-        [기사]
-        제목: {title}
-        내용: {text[:6000]}
-        
+        [기사] 제목: {title} / 내용: {text[:6000]}
         [규칙]
         1. **총 8장 (Cover 1 + Story 6 + Outro 1)**
         2. **Cover:** HEAD(10자 이내 훅), DESC(40자 이내 요약)
-        3. **Story:** 각 장마다 **새로운 내용**을 담으세요.
-           - HEAD: 10자 이내 핵심 키워드
-           - DESC: 80~100자 내외의 **꽉 찬** 설명.
+        3. **Story:** 각 장마다 새로운 내용. HEAD(핵심), DESC(80자 이상 충실히).
         4. **Color:** 기사 분위기에 맞는 짙은 색상(Hex) 1개.
-        
-        [출력 양식]
+        [출력]
         COLOR_MAIN: #Hex
-        
         [SLIDE 1]
         TYPE: COVER
         HEAD: ...
@@ -211,60 +228,53 @@ if st.button("🚀 카드뉴스 제작"):
         DESC: 세상을 보는 눈, 세계일보
         """
         response = model.generate_content(prompt)
-        res_text = response.text
         
         slides = []
         curr = {}
-        # [수정] 기본값 설정
         color_main = "#FFD700" 
         
         for line in res_text.split('\n'):
             line = line.strip()
             if not line: continue
             
-            clean_line = line.replace('*', '').strip() 
+            # [핵심 수정 1] AI의 불필요한 기호(Markdown) 제거 후 검사
+            # "- DESC:", "* DESC:" 등을 잡아내기 위해
+            norm_line = line.replace('*', '').replace('-', '').strip()
             
-            if clean_line.startswith("COLOR_MAIN:"):
-                # [수정] 색상 파싱 후 즉시 검증
-                raw_color = clean_line.split(":")[1].strip()
+            if "COLOR_MAIN:" in norm_line:
+                raw_color = norm_line.split(":")[1].strip()
                 color_main = validate_hex_color(raw_color)
                 
-            elif "[SLIDE" in clean_line:
+            elif "[SLIDE" in norm_line:
                 if curr: slides.append(curr)
                 curr = {"HEAD": "", "DESC": "", "TYPE": ""}
-            elif clean_line.startswith("TYPE:"): curr["TYPE"] = clean_line.split(":")[1].strip()
-            elif clean_line.startswith("HEAD:"): curr["HEAD"] = clean_line.split("HEAD:")[1].strip()
-            elif clean_line.startswith("DESC:"): curr["DESC"] = clean_line.split("DESC:")[1].strip()
+            
+            # [핵심 수정 2] startswith 대신 'in' 사용 및 split으로 안전하게 추출
+            elif "TYPE:" in norm_line: 
+                curr["TYPE"] = line.split("TYPE:")[1].strip()
+            elif "HEAD:" in norm_line: 
+                curr["HEAD"] = line.split("HEAD:")[1].strip()
+            elif "DESC:" in norm_line: 
+                curr["DESC"] = line.split("DESC:")[1].strip()
+                
         if curr: slides.append(curr)
         
     except: st.error("기획 실패"); st.stop()
 
-    # --- 자산 로드 ---
+    # --- 자산 로드 (자동화) ---
     try:
-        res_default = get_resources()
-        def load_font_bytes(uploaded, default):
-            if uploaded: return uploaded.getvalue()
-            return default
-        b_title = load_font_bytes(font_title, res_default['title'])
-        b_body = load_font_bytes(font_body, res_default['body'])
-        b_serif = load_font_bytes(font_serif, res_default['serif'])
+        web_res = get_web_resources()
         
-        def load_uploaded_logo(uploaded, width_target):
-            if not uploaded: return None
-            data = uploaded.getvalue()
-            img = None
-            if uploaded.name.lower().endswith('.ai'):
-                img = render_ai_to_image(data)
-            else:
-                img = Image.open(io.BytesIO(data)).convert("RGBA")
-            if img:
-                ar = img.height / img.width
-                return img.resize((width_target, int(width_target * ar)))
-            return None
+        # 폰트 로드: 업로드 -> 로컬파일 -> 웹폰트 순
+        b_title = load_asset_bytes(font_title, ASSET_FILENAMES['font_title'], web_res['title'])
+        b_body = load_asset_bytes(font_body, ASSET_FILENAMES['font_body'], web_res['body'])
+        b_serif = load_asset_bytes(font_serif, ASSET_FILENAMES['font_serif'], web_res['serif'])
+        
+        # 로고 로드: 업로드 -> 로컬파일 순
+        img_symbol = load_logo_image(symbol_file, ASSET_FILENAMES['symbol'], 60)
+        img_logotxt = load_logo_image(text_logo_file, ASSET_FILENAMES['text'], 160)
 
-        img_symbol = load_uploaded_logo(symbol_file, 60)
-        img_logotxt = load_uploaded_logo(text_logo_file, 160)
-
+        # 배경 이미지
         if user_image: base_img = Image.open(user_image)
         elif img_url:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -272,6 +282,7 @@ if st.button("🚀 카드뉴스 제작"):
         else: base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         base_img = base_img.convert('RGB').resize((1080, 1080))
         
+        # 배경 세트
         grad = create_smooth_gradient(1080, 1080)
         bg_cover = base_img.copy()
         bg_cover.paste(grad, (0,0), grad)
@@ -280,7 +291,6 @@ if st.button("🚀 카드뉴스 제작"):
         bg_blur = bg_blur.filter(ImageFilter.GaussianBlur(15))
         bg_blur = ImageEnhance.Brightness(bg_blur).enhance(0.7)
         
-        # [수정] color_main이 검증된 상태라 안전함
         try: bg_outro = Image.new('RGB', (1080, 1080), color=color_main)
         except: bg_outro = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         bg_outro = add_noise_texture(bg_outro, 0.03)
@@ -301,6 +311,7 @@ if st.button("🚀 카드뉴스 제작"):
             
         draw = ImageDraw.Draw(img, 'RGBA')
         
+        # 폰트
         ft_head = ImageFont.truetype(io.BytesIO(b_title), 95)
         ft_desc = ImageFont.truetype(io.BytesIO(b_body), 48)
         ft_small = ImageFont.truetype(io.BytesIO(b_body), 30)
@@ -309,6 +320,7 @@ if st.button("🚀 카드뉴스 제작"):
         # [로고]
         if slide['TYPE'] != 'OUTRO':
             paste_hybrid_logo(img, img_symbol, img_logotxt, x=50, y=50, gap=15)
+            # 파일 없으면 텍스트 대체
             if not img_logotxt and not img_symbol:
                 draw.text((50, 50), "SEGYE BRIEFING", font=ft_small, fill="#FFD700")
             draw.text((950, 60), f"{i+1} / {len(slides)}", font=ft_small, fill="white")
@@ -317,6 +329,7 @@ if st.button("🚀 카드뉴스 제작"):
         if slide['TYPE'] == 'COVER':
             head = slide.get("HEAD", "")
             desc = slide.get("DESC", "")
+            
             d_lines = wrap_text(desc, ft_desc, 980, draw)
             desc_h = len(d_lines) * 60
             curr_y = 1080 - 100 - desc_h 
@@ -325,7 +338,7 @@ if st.button("🚀 카드뉴스 제작"):
                 curr_y += 60
             curr_y -= (desc_h + 30)
             
-            # [수정] 여기가 에러 발생 지점이었음. color_main이 안전해져서 에러 안 남.
+            # [수정] 색상 에러 방지된 color_main 사용
             draw.rectangle([(50, curr_y), (150, curr_y+10)], fill=color_main)
             
             h_lines = wrap_text(head, ft_head, 980, draw)
@@ -418,4 +431,4 @@ if st.button("🚀 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_safe.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_complete.zip", "application/zip", use_container_width=True)
