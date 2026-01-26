@@ -3,7 +3,7 @@ import google.generativeai as genai
 from newspaper import Article, Config
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageStat
 from io import BytesIO
 import re
 import random
@@ -69,6 +69,37 @@ def wrap_text(text, font, max_width, draw):
             else: lines.append(current_line); current_line = word
         lines.append(current_line)
     return lines
+
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.strip().lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join([c * 2 for c in hex_color])
+    try:
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    except: 
+        return (255, 255, 255)
+
+def relative_luminance(rgb):
+    def channel(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+def contrast_ratio(c1, c2):
+    l1 = relative_luminance(c1)
+    l2 = relative_luminance(c2)
+    lighter, darker = (l1, l2) if l1 >= l2 else (l2, l1)
+    return (lighter + 0.05) / (darker + 0.05)
+
+def pick_contrast_text_color(bg_rgb, preferred_hex, min_ratio=4.5):
+    preferred_rgb = hex_to_rgb(preferred_hex)
+    if contrast_ratio(bg_rgb, preferred_rgb) >= min_ratio:
+        return preferred_hex
+    # Fallback to white/black depending on higher contrast
+    white = (255, 255, 255)
+    black = (15, 15, 15)
+    return "#FFFFFF" if contrast_ratio(bg_rgb, white) >= contrast_ratio(bg_rgb, black) else "#0F0F0F"
 
 def generate_qr_code(link):
     qr = qrcode.QRCode(box_size=10, border=1)
@@ -295,9 +326,19 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
             total_h = (len(h_lines) * 110) + (len(d_lines) * 65) + 50
             start_y = (1080 - total_h) / 2
             
+            # 배경 평균색을 기반으로 제목 대비 색상 선택
+            title_box_top = max(0, int(start_y - 20))
+            title_box_bottom = min(1080, int(start_y + (len(h_lines) * 110) + 20))
+            title_box = (90, title_box_top, 990, title_box_bottom)
+            try:
+                avg_rgb = tuple(int(c) for c in ImageStat.Stat(img.crop(title_box)).mean[:3])
+            except:
+                avg_rgb = (30, 30, 30)
+            title_color = pick_contrast_text_color(avg_rgb, color_main, min_ratio=4.5)
+            
             # 제목 출력
             for line in h_lines:
-                draw.text((90, start_y), line, font=f_head, fill=color_main) # 제목은 컬러
+                draw.text((90, start_y), line, font=f_head, fill=title_color) # 배경 대비 색상
                 start_y += 110
             
             # 구분선
