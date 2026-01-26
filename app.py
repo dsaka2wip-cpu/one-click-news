@@ -14,7 +14,7 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v13.1", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v13.2", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -75,7 +75,7 @@ def advanced_scrape(url):
 
 @st.cache_resource
 def get_web_resources():
-    return None # 로컬 폰트 사용
+    return None 
 
 def load_fonts_local():
     font_dir = "fonts"
@@ -191,7 +191,7 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v13.1 Context-Aware Layouts)")
+st.title("📰 One-Click News (v13.2 Syntax Fix)")
 
 # 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -211,12 +211,12 @@ with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기
 
     ### 🧠 1. Intelligence (맥락 인식 기획)
     * **내러티브 구조화:** 기사를 기계적으로 줄이지 않고, **'Hook(유입) - Content(전개) - Conclusion(결론)'**의 8단 구성으로 재창조합니다.
-    * **[NEW] 맥락 기반 레이아웃 결정:** AI가 문단의 성격을 분석하여 **인용문(Quote), 데이터(Data), 서술(Box), 요약(Bar)** 중 가장 적합한 디자인을 스스로 선택합니다. (랜덤 X)
+    * **맥락 기반 레이아웃 결정:** AI가 문단의 성격을 분석하여 **인용문(Quote), 데이터(Data), 서술(Box), 요약(Bar)** 중 가장 적합한 디자인을 스스로 선택합니다.
     * **태그 자동 감지:** 기사 제목의 `[단독]`, `[심층기획]` 등을 인식해 전용 뱃지를 부착합니다.
 
     ### 🎨 2. Design Engine (유동적 디자인)
-    * **멀티 포맷 지원:** 인스타그램 피드(1:1)와 스토리(9:16) 포맷을 즉시 전환합니다.
-    * **Auto Color:** 사진에서 가장 어울리는 테마 색상을 자동 추출합니다.
+    * **멀티 포맷 지원:** 인스타그램 피드(1:1)와 스토리(9:16) 포맷을 즉시 전환하여 생성합니다.
+    * **지능형 컬러 피킹 (Auto Color):** 업로드된 보도사진의 **지배적인 색상(Dominant Color)**을 AI가 분석·추출하여, 사진과 가장 잘 어울리는 테마 컬러를 자동 적용합니다.
     * **Safe Layout:** 텍스트가 절대 잘리지 않는 Top-Down 방식의 안전한 레이아웃을 사용합니다.
 
     ### 🛡️ 3. Core Tech (안정성 & 디테일)
@@ -260,7 +260,6 @@ if run_button:
             model_name = get_available_model()
             model = genai.GenerativeModel(model_name)
             
-            # [핵심] 프롬프트에 디자인 결정 규칙 추가
             prompt = f"""
             당신은 세계일보 전문 에디터이자 아트 디렉터입니다. 기사를 SNS용 카드뉴스 8장으로 기획하세요.
             [제목] {title}
@@ -313,7 +312,6 @@ if run_button:
                 elif line.startswith("HASHTAGS:"): hashtags = line.split(":", 1)[1].strip()
                 elif "[SLIDE" in line:
                     if curr: slides.append(curr)
-                    # 기본값을 BOX로 두되 AI가 바꾸도록 함
                     curr = {"HEAD":"", "DESC":"", "TYPE":"BOX"}
                     mode = None
                 elif line.startswith("TYPE:"): curr["TYPE"] = line.split(":", 1)[1].strip()
@@ -373,7 +371,8 @@ if run_button:
             tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
             
             for i, slide in enumerate(slides):
-                sType = slide.get('TYPE', 'BOX').upper() # AI가 준 타입 사용 (기본값 BOX)
+                # AI가 정해준 타입을 쓰되 대문자로 통일
+                sType = slide.get('TYPE', 'BOX').upper() 
                 
                 # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
@@ -463,7 +462,23 @@ if run_button:
                         draw_text_with_stroke(draw, (120, start_y), l, f_body, fill="#dddddd", stroke_width=2)
                         start_y += 65
 
-                else: # 기본 BOX형 (또는 AI가 엉뚱한 TYPE을 줬을 때 Fallback)
+                elif sType == 'OUTRO': # 아웃트로
+                    out_c = "white" if is_color_dark(color_main) else "black"
+                    slogan = "First in, Last out"
+                    w = draw.textlength(slogan, font=f_serif)
+                    draw.text(((CANVAS_W-w)/2, CANVAS_H//3), slogan, f_serif, fill=out_c)
+                    brand = "세상을 보는 눈, 세계일보"
+                    w2 = draw.textlength(brand, font=f_body)
+                    draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, f_body, fill=out_c)
+                    qr = generate_qr_code(url).resize((250, 250))
+                    qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
+                    draw.rounded_rectangle((qx, qy, qx+250, qy+250), 20, "white")
+                    img.paste(qr, (qx+10, qy+10))
+                    msg = "기사 원문 보러가기"
+                    w3 = draw.textlength(msg, font=f_small)
+                    draw.text(((CANVAS_W-w3)/2, qy + 270), msg, f_small, fill=out_c)
+
+                else: # Fallback: BOX형
                     start_y = 250 if not is_story else 350
                     h_lines = wrap_text(head, f_title, CANVAS_W-150, draw)
                     d_lines = wrap_text(desc, f_body, CANVAS_W-150, draw)
@@ -482,9 +497,6 @@ if run_button:
                     for l in d_lines:
                         draw_text_with_stroke(draw, (120, txt_y), l, f_body, fill="white", stroke_width=0)
                         txt_y += 65
-
-                elif sType == 'OUTRO': # (위에서 처리됨, 구조상 여기 올 일 없음)
-                    pass
 
                 generated_images.append(img)
                 with tabs[i]: st.image(img)
