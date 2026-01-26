@@ -13,8 +13,8 @@ from datetime import datetime
 
 # --- 페이지 설정 ---
 st.set_page_config(page_title="One-Click News v8.0", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v8.0 Segae Identity)")
-st.markdown("### 💎 세계일보 CI 적용 & 인물 얼굴 절대 사수 & 배경 블러 차별화")
+st.title("📰 One-Click News (v8.1 Segae Identity)")
+st.markdown("### 💎 세계일보 CI & 글씨체 적용")
 
 # --- 폰트 및 로고 리소스 준비 ---
 @st.cache_resource
