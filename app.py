@@ -10,26 +10,26 @@ import zipfile
 import qrcode
 import os
 import numpy as np
-import fitz  # PyMuPDF (AI파일 변환용)
+import fitz  # PyMuPDF
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.2", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.2 Robuster)")
-st.markdown("### 💎 파싱 오류 완벽 수정 & 로고 업로더 복구")
+st.set_page_config(page_title="One-Click News v9.3", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.3 Final Fix)")
+st.markdown("### 💎 디자인 완성 & 에러 완전 해결")
 
 # --- 리소스 캐싱 ---
 @st.cache_resource
 def get_resources():
     resources = {}
     try:
-        # 기본 폰트 (업로드 없을 때 비상용)
+        # 기본 폰트
         resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/blackhansans/BlackHanSans-Regular.ttf", timeout=10).content
         resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
         resources['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
     except: return None
     return resources
 
-# --- 디자인 유틸리티 ---
+# --- 디자인 유틸리티 (에러 수정됨) ---
 def add_noise_texture(img, intensity=0.05):
     if img.mode != 'RGBA': img = img.convert('RGBA')
     width, height = img.size
@@ -37,11 +37,12 @@ def add_noise_texture(img, intensity=0.05):
     noise[:, :, 3] = int(255 * intensity)
     return Image.alpha_composite(img, Image.fromarray(noise, 'RGBA'))
 
-def draw_rounded_box(draw, xy, r, fill):
-    draw.rounded_rectangle(xy, radius=r, fill=fill)
+# [수정 1] 변수명 r -> radius로 통일
+def draw_rounded_box(draw, xy, radius, fill):
+    draw.rounded_rectangle(xy, radius=radius, fill=fill)
 
-def create_glass_box(draw, xy, r, fill=(0,0,0,160)):
-    draw_rounded_box(draw, xy, r, fill)
+def create_glass_box(draw, xy, radius, fill=(0,0,0,160)):
+    draw_rounded_box(draw, xy, radius, fill)
 
 def create_smooth_gradient(width, height):
     overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -55,7 +56,6 @@ def create_smooth_gradient(width, height):
 
 def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color="black", offset=(3, 3)):
     x, y = position
-    # 강력한 그림자 (가독성 보장)
     for ox in [-1, 0, 1]:
         for oy in [-1, 0, 1]:
             if ox == 0 and oy == 0: continue
@@ -96,20 +96,17 @@ def is_color_dark(hex_color):
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 120
 
 def paste_hybrid_logo(bg_img, symbol, logotxt, x=50, y=50, gap=15):
-    """심볼과 텍스트 로고를 나란히 배치"""
     next_x = x
     if symbol:
         bg_img.paste(symbol, (x, y), symbol)
         next_x += symbol.width + gap
-    
     if logotxt:
-        # 심볼 중앙 높이에 텍스트 맞춤
         target_y = y
         if symbol:
             target_y = y + (symbol.height - logotxt.height) // 2
         bg_img.paste(logotxt, (next_x, target_y), logotxt)
 
-# --- 스크래핑 엔진 ---
+# --- 스크래핑 ---
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
     try:
@@ -143,7 +140,6 @@ with st.sidebar:
     user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
     
     st.markdown("#### 🎨 로고 & 폰트")
-    # 로고 업로더 부활 (확실한 적용을 위해)
     symbol_file = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
     text_logo_file = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
     
@@ -163,34 +159,23 @@ if st.button("🚀 카드뉴스 제작"):
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- AI 프롬프트 (v9.2) ---
+    # --- AI 프롬프트 ---
     try:
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         prompt = f"""
-        당신은 세계일보의 '비주얼 에디터'입니다.
-        
-        [기사]
-        제목: {title}
-        내용: {text[:6000]}
-        
+        당신은 세계일보의 '디지털 스토리텔링 에디터'입니다.
+        [기사] 제목: {title} / 내용: {text[:6000]}
         [규칙]
         1. **총 8장 (Cover 1 + Story 6 + Outro 1)**
         2. **Cover:** HEAD(10자 이내 훅), DESC(40자 이내 요약)
-        3. **Story:** 각 장마다 **새로운 내용**을 담으세요. (반복 금지)
+        3. **Story:** 각 장마다 **새로운 내용**을 담으세요.
            - HEAD: 10자 이내 핵심 키워드
            - DESC: 80~100자 내외의 **꽉 찬** 설명.
         4. **Color:** 기사 분위기에 맞는 짙은 색상(Hex) 1개.
-        
-        [출력 양식]
+        [출력]
         COLOR_MAIN: #Hex
-        
         [SLIDE 1]
         TYPE: COVER
-        HEAD: ...
-        DESC: ...
-        
-        [SLIDE 2]
-        TYPE: CONTENT
         HEAD: ...
         DESC: ...
         ...
@@ -210,8 +195,6 @@ if st.button("🚀 카드뉴스 제작"):
             line = line.strip()
             if not line: continue
             
-            # [핵심 수정: 파싱 강화]
-            # **HEAD:** 처럼 별표가 붙어 나와도 제거하고 인식하도록 처리
             clean_line = line.replace('*', '').strip() 
             
             if clean_line.startswith("COLOR_MAIN:"): color_main = clean_line.split(":")[1].strip()
@@ -221,25 +204,20 @@ if st.button("🚀 카드뉴스 제작"):
             elif clean_line.startswith("TYPE:"): curr["TYPE"] = clean_line.split(":")[1].strip()
             elif clean_line.startswith("HEAD:"): curr["HEAD"] = clean_line.split("HEAD:")[1].strip()
             elif clean_line.startswith("DESC:"): curr["DESC"] = clean_line.split("DESC:")[1].strip()
-            
         if curr: slides.append(curr)
         
     except: st.error("기획 실패"); st.stop()
 
     # --- 자산 로드 ---
     try:
-        # 1. 폰트 로드 (파일 있으면 쓰고, 없으면 기본값)
         res_default = get_resources()
-        
         def load_font_bytes(uploaded, default):
             if uploaded: return uploaded.getvalue()
             return default
-            
         b_title = load_font_bytes(font_title, res_default['title'])
         b_body = load_font_bytes(font_body, res_default['body'])
         b_serif = load_font_bytes(font_serif, res_default['serif'])
         
-        # 2. 로고 로드 (업로드된 파일 처리)
         def load_uploaded_logo(uploaded, width_target):
             if not uploaded: return None
             data = uploaded.getvalue()
@@ -248,7 +226,6 @@ if st.button("🚀 카드뉴스 제작"):
                 img = render_ai_to_image(data)
             else:
                 img = Image.open(io.BytesIO(data)).convert("RGBA")
-            
             if img:
                 ar = img.height / img.width
                 return img.resize((width_target, int(width_target * ar)))
@@ -257,7 +234,6 @@ if st.button("🚀 카드뉴스 제작"):
         img_symbol = load_uploaded_logo(symbol_file, 60)
         img_logotxt = load_uploaded_logo(text_logo_file, 160)
 
-        # 3. 배경 이미지
         if user_image: base_img = Image.open(user_image)
         elif img_url:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -265,7 +241,6 @@ if st.button("🚀 카드뉴스 제작"):
         else: base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         base_img = base_img.convert('RGB').resize((1080, 1080))
         
-        # 4. 배경 변주 생성
         grad = create_smooth_gradient(1080, 1080)
         bg_cover = base_img.copy()
         bg_cover.paste(grad, (0,0), grad)
@@ -293,37 +268,30 @@ if st.button("🚀 카드뉴스 제작"):
         else: img = bg_blur.copy()
             
         draw = ImageDraw.Draw(img, 'RGBA')
-        
-        # 폰트 매번 생성 (안정성)
         ft_head = ImageFont.truetype(io.BytesIO(b_title), 95)
         ft_desc = ImageFont.truetype(io.BytesIO(b_body), 48)
         ft_small = ImageFont.truetype(io.BytesIO(b_body), 30)
         ft_serif = ImageFont.truetype(io.BytesIO(b_serif), 90)
         
-        # [로고 배치]
+        # [로고]
         if slide['TYPE'] != 'OUTRO':
             paste_hybrid_logo(img, img_symbol, img_logotxt, x=50, y=50, gap=15)
-            # 텍스트 로고가 없으면 텍스트로 대체
             if not img_logotxt and not img_symbol:
                 draw.text((50, 50), "SEGYE BRIEFING", font=ft_small, fill="#FFD700")
-            
             draw.text((950, 60), f"{i+1} / {len(slides)}", font=ft_small, fill="white")
 
         # [COVER]
         if slide['TYPE'] == 'COVER':
             head = slide.get("HEAD", "")
             desc = slide.get("DESC", "")
-            
             d_lines = wrap_text(desc, ft_desc, 980, draw)
             desc_h = len(d_lines) * 60
             curr_y = 1080 - 100 - desc_h 
             for line in d_lines:
                 draw_text_with_shadow(draw, (50, curr_y), line, ft_desc, fill="#eeeeee")
                 curr_y += 60
-            
             curr_y -= (desc_h + 30)
             draw.rectangle([(50, curr_y), (150, curr_y+10)], fill=color_main)
-            
             h_lines = wrap_text(head, ft_head, 980, draw)
             head_h = len(h_lines) * 110
             curr_y -= (head_h + 30)
@@ -342,9 +310,7 @@ if st.button("🚀 카드뉴스 제작"):
                 d_lines = wrap_text(desc, ft_desc, 850, draw)
                 box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
                 start_y = (1080 - box_h) / 2
-                
                 create_glass_box(draw, (80, start_y, 1000, start_y + box_h), 30)
-                
                 txt_y = start_y + 50
                 for line in h_lines:
                     draw.text((120, txt_y), line, font=ft_head, fill=text_color_title)
@@ -360,7 +326,6 @@ if st.button("🚀 카드뉴스 제작"):
                 d_lines = wrap_text(desc, ft_desc, 900, draw)
                 total_h = (len(h_lines)*110) + (len(d_lines)*65) + 60
                 start_y = (1080 - total_h) / 2
-                
                 draw.rectangle([(60, start_y), (75, start_y + total_h)], fill=color_main)
                 for line in h_lines:
                     draw_text_with_shadow(draw, (100, start_y), line, ft_head)
@@ -389,11 +354,8 @@ if st.button("🚀 카드뉴스 제작"):
             slogan = "First in, Last out"
             bbox = draw.textbbox((0, 0), slogan, font=ft_serif)
             w = bbox[2] - bbox[0]
-            
             outro_color = "white" if is_color_dark(color_main) else "black"
-            
             draw.text(((1080-w)/2, 350), slogan, font=ft_serif, fill=outro_color)
-            
             brand = "세상을 보는 눈, 세계일보"
             bbox2 = draw.textbbox((0, 0), brand, font=ft_desc)
             w2 = bbox2[2] - bbox2[0]
@@ -402,6 +364,7 @@ if st.button("🚀 카드뉴스 제작"):
             qr_img = generate_qr_code(url).resize((220, 220))
             qr_x = (1080 - 240) // 2
             qr_y = 650
+            # [수정 2] radius=20 키워드 인수 사용
             draw_rounded_box(draw, (qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
             img.paste(qr_img, (qr_x+10, qr_y+10))
             
@@ -420,4 +383,4 @@ if st.button("🚀 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_final.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_fix.zip", "application/zip", use_container_width=True)
