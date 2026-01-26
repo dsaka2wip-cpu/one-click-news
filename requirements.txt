@@ -4,5 +4,6 @@ newspaper3k
 requests
 beautifulsoup4
 Pillow
+pymupdf
 qrcode
 lxml

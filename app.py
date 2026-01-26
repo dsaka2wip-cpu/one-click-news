@@ -4,6 +4,7 @@ from newspaper import Article, Config
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageStat
+import fitz
 from io import BytesIO
 import re
 import random
@@ -107,6 +108,15 @@ def generate_qr_code(link):
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white")
 
+def render_ai_to_image(ai_bytes):
+    try:
+        doc = fitz.open(stream=ai_bytes, filetype="pdf")
+        page = doc.load_page(0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
+        return Image.open(BytesIO(pix.tobytes("png"))).convert("RGBA")
+    except:
+        return None
+
 # --- 스크래핑 엔진 ---
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
@@ -139,8 +149,22 @@ with st.sidebar:
     if api_key: genai.configure(api_key=api_key)
     st.markdown("---")
     user_image = st.file_uploader("기사 사진 업로드 (1순위)", type=['png', 'jpg', 'jpeg'])
-    logo_file = st.file_uploader("세계일보 로고/CI (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
-    body_font_file = st.file_uploader("본문 폰트 업로드 (TTF/OTF)", type=['ttf', 'otf'])
+    logo_files = st.file_uploader("세계일보 로고/CI (PNG/JPG/AI)", type=['png', 'jpg', 'jpeg', 'ai'], accept_multiple_files=True)
+    body_font_files = st.file_uploader("본문 폰트 업로드 (TTF/OTF)", type=['ttf', 'otf'], accept_multiple_files=True)
+
+    selected_logo_file = None
+    if logo_files:
+        logo_names = [f.name for f in logo_files]
+        selected_logo_name = st.selectbox("사용할 CI 선택", logo_names)
+        selected_logo_file = next((f for f in logo_files if f.name == selected_logo_name), None)
+
+    font_options = ["기본(NanumGothic-Bold)"]
+    if body_font_files:
+        font_options += [f.name for f in body_font_files]
+    selected_font_name = st.selectbox("본문 폰트 선택", font_options)
+    selected_font_file = None
+    if selected_font_name != font_options[0] and body_font_files:
+        selected_font_file = next((f for f in body_font_files if f.name == selected_font_name), None)
 
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -238,11 +262,20 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
 
         # 5. 로고 준비
         logo_img = None
-        if logo_file:
-            logo_img = Image.open(logo_file).convert("RGBA")
-            # 로고 리사이즈 (너비 200px 기준)
-            aspect = logo_img.height / logo_img.width
-            logo_img = logo_img.resize((250, int(250 * aspect)))
+        if selected_logo_file:
+            logo_name = selected_logo_file.name.lower()
+            logo_bytes = selected_logo_file.getvalue()
+            if logo_name.endswith(".ai"):
+                logo_img = render_ai_to_image(logo_bytes)
+            else:
+                logo_img = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+
+            if logo_img:
+                # 로고 리사이즈 (너비 250px 기준)
+                aspect = logo_img.height / logo_img.width
+                logo_img = logo_img.resize((250, int(250 * aspect)))
+            else:
+                st.warning("AI 로고 변환에 실패했습니다. PNG/JPG로 다시 업로드해 주세요.")
             
     except: st.error("이미지 처리 실패"); st.stop()
 
@@ -266,7 +299,7 @@ if st.button("🚀 세계일보 카드뉴스 제작"):
         draw = ImageDraw.Draw(img)
         
         # 폰트
-        body_font_bytes = body_font_file.getvalue() if body_font_file else res['body']
+        body_font_bytes = selected_font_file.getvalue() if selected_font_file else res['body']
         f_head = ImageFont.truetype(BytesIO(res['title']), 95) # 더 키움
         f_desc = ImageFont.truetype(BytesIO(body_font_bytes), 48)
         f_serif = ImageFont.truetype(BytesIO(res['serif']), 90)
