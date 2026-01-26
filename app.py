@@ -14,22 +14,57 @@ import fitz  # PyMuPDF
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v12.1", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v12.2", page_icon="📰", layout="wide")
 
-# --- [2] 자산 파일명 설정 ---
-ASSET_FILENAMES = {
-    "symbol": "segye_symbol.png",
-    "text": "segye_text.png",
-    "font_title": "Title.ttf",
-    "font_body": "Body.ttf",
-    "font_serif": "Serif.ttf"
-}
+# --- [2] 고정 자산 설정 (파일명을 상수로 정의) ---
+# ※ 이 파일들이 app.py와 같은 폴더에 있어야 합니다.
+LOGO_SYMBOL_PATH = "segye_symbol.png"
+LOGO_TEXT_PATH = "segye_text.png"
 
 # ==============================================================================
 # [3] 함수 정의 구역
 # ==============================================================================
 
-# 3-1. 스크래핑 함수 (이미지 다중 추출)
+# 3-1. 폰트 안정화 (로컬 저장 방식)
+@st.cache_resource
+def load_fonts_local():
+    """폰트를 서버 로컬 폴더에 다운로드하여 안정성을 확보합니다."""
+    font_dir = "fonts"
+    if not os.path.exists(font_dir):
+        os.makedirs(font_dir)
+        
+    fonts = {
+        'title': "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-ExtraBold.ttf",
+        'body': "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf",
+        'serif': "https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf"
+    }
+    
+    paths = {}
+    for key, url in fonts.items():
+        filename = os.path.join(font_dir, f"{key}.ttf")
+        if not os.path.exists(filename):
+            try:
+                resp = requests.get(url, timeout=10)
+                with open(filename, "wb") as f:
+                    f.write(resp.content)
+            except:
+                pass # 실패 시 None 처리
+        paths[key] = filename if os.path.exists(filename) else None
+        
+    return paths
+
+# 3-2. 로컬 이미지 로드 (로고용)
+def load_local_image(path, width_target):
+    if not os.path.exists(path):
+        return None
+    try:
+        img = Image.open(path).convert("RGBA")
+        ar = img.height / img.width
+        return img.resize((width_target, int(width_target * ar)))
+    except:
+        return None
+
+# 3-3. 스크래핑 함수 (이미지 다중 추출)
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
     images = [] 
@@ -65,40 +100,6 @@ def advanced_scrape(url):
             valid_images.append(img)
             
     return title, text, valid_images
-
-# 3-2. 리소스 캐싱
-@st.cache_resource
-def get_web_resources():
-    resources = {}
-    try:
-        base_url = "https://github.com/google/fonts/raw/main/ofl/"
-        resources['title'] = requests.get(base_url + "nanumgothic/NanumGothic-ExtraBold.ttf", timeout=10).content
-        resources['body'] = requests.get(base_url + "nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
-        resources['serif'] = requests.get(base_url + "nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
-    except: return None
-    return resources
-
-# 3-3. 자산 로더
-def load_asset_bytes(uploader, filename, fallback_bytes=None):
-    if uploader and hasattr(uploader, 'getvalue'): return uploader.getvalue()
-    if os.path.exists(filename):
-        with open(filename, "rb") as f: return f.read()
-    return fallback_bytes
-
-def load_logo_image(uploader, filename, width_target):
-    data = load_asset_bytes(uploader, filename)
-    if not data: return None
-    try:
-        if filename.lower().endswith('.ai') or (uploader and hasattr(uploader, 'name') and uploader.name.lower().endswith('.ai')):
-            doc = fitz.open(stream=data, filetype="pdf")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
-            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
-        else:
-            img = Image.open(io.BytesIO(data)).convert("RGBA")
-        ar = img.height / img.width
-        return img.resize((width_target, int(width_target * ar)))
-    except: return None
 
 # 3-4. 색상 추출
 def get_dominant_color(pil_img):
@@ -154,7 +155,7 @@ def create_smooth_gradient(width, height):
             draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     return overlay
 
-def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color="black", offset=(3, 3)):
+def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color="black", offset=(2, 2)):
     x, y = position
     for ox in [-2, 0, 2]:
         for oy in [-2, 0, 2]:
@@ -223,31 +224,31 @@ with st.sidebar:
     
     st.markdown("#### 🎨 자산 설정")
     user_image = st.file_uploader("대표 이미지 (선택)", type=['png', 'jpg', 'jpeg'])
-    st.caption("※ 미업로드 시 기사 본문 사진을 자동으로 가져와 배치합니다.")
-    
     use_auto_color = st.checkbox("📸 사진에서 테마 색상 자동 추출", value=True)
     
-    up_symbol = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
-    up_text_logo = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
-    
-    with st.expander("폰트 수동 변경"):
-        up_font_title = st.file_uploader("제목 폰트", type=['ttf', 'otf'])
-        up_font_body = st.file_uploader("본문 폰트", type=['ttf', 'otf'])
-        up_font_serif = st.file_uploader("명조 폰트", type=['ttf', 'otf'])
+    # [수정] 로고 업로더 제거됨 (자동 로드)
+    if os.path.exists(LOGO_SYMBOL_PATH) and os.path.exists(LOGO_TEXT_PATH):
+        st.success("✅ 세계일보 로고 파일이 감지되었습니다.")
+    else:
+        st.warning("⚠️ 로고 파일(segye_symbol.png, segye_text.png)이 폴더에 없습니다.")
 
 # ==============================================================================
-# [5] 메인 UI & 시스템 안내문 (최신 업데이트 반영)
+# [5] 메인 UI (순서 변경: URL 입력 -> 안내)
 # ==============================================================================
-st.title("📰 One-Click News (v12.1 System Spec)")
+st.title("📰 One-Click News (v12.2 UX Fixed)")
 
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Updated)", expanded=True):
+# 1. URL 입력창을 최상단으로
+url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
+
+# 2. 안내문은 아래로 (접힌 상태로 시작)
+with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세", expanded=False):
     st.markdown("""
     이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI 기술**이 결합된 지능형 제작 도구입니다.
     
     ### 🧠 1. Intelligence (맥락 인식 기획)
     * **내러티브 구조화:** 기사를 기계적으로 줄이지 않고, **'Hook(유입) - Content(전개) - Conclusion(결론)'**의 8단 구성으로 재창조합니다.
     * **데이터 감지 (Big Number):** 기사 내 핵심 수치(%, 금액 등)가 감지되면, 이를 자동으로 포착하여 **인포그래픽(Data Visualization)** 슬라이드로 변환합니다.
-    * **모델 자동 우회 (Auto-Pilot):** 구글의 최신 AI 모델(Gemini 1.5 Flash)을 우선 사용하되, 연결이 불안정할 경우 자동으로 예비 모델로 전환하여 **실패 없는 제작**을 보장합니다.
+    * **모델 자동 우회 (Auto-Pilot):** 구글의 최신 AI 모델을 자동 탐색하여 연결 실패를 방지합니다.
 
     ### 🎨 2. Design Engine (유동적 디자인)
     * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 포맷을 즉시 전환하여 생성합니다.
@@ -255,17 +256,10 @@ with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기
     * **레이아웃 변주 시스템:** 텍스트 분량과 성격에 따라 **[박스형 / 바형 / 인용구형 / 빅넘버형]** 4가지 디자인을 유기적으로 섞어 지루함을 없앴습니다.
 
     ### 🛡️ 3. Core Tech (안정성 & 디테일)
-    * **타이포그래피 교정:** `3 . 1절`과 같은 어색한 띄어쓰기나 문장 부호 오류를 **정규표현식(Regex)** 엔진이 자동으로 교정합니다.
-    * **하이브리드 로고 시스템:** 심볼과 텍스트 로고를 분리하여 인식하고, 배경의 밝기에 따라 최적의 위치에 배치합니다.
-
-    ### 📸 4. Visual Context & SEO (v12.0 New)
-    * **멀티 이미지 스크래핑:** 썸네일뿐만 아니라 **기사 본문의 모든 사진을 수집**하여, 슬라이드마다 서로 다른 배경을 배치해 시각적 풍부함을 더합니다.
-    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 **밝기를 자동으로 조절(Dimming)**하고 텍스트 그림자를 강화했습니다.
-    * **Visual SEO (해시태그):** 인스타그램 등 소셜 미디어 유입을 극대화하기 위해, 기사 내용에 최적화된 **추천 해시태그**를 자동 생성합니다.
+    * **자동 자산 로드:** 로고 파일을 매번 올릴 필요 없이, 서버에 저장된 고화질 로고를 자동으로 불러옵니다.
+    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 밝기를 자동으로 조절합니다.
+    * **Visual SEO:** 인스타그램 등 소셜 미디어 유입을 극대화하기 위한 해시태그를 자동 생성합니다.
     """)
-
-st.markdown("---")
-url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
 # ==============================================================================
 # [6] 메인 실행 로직
@@ -364,19 +358,22 @@ if st.button("🚀 카드뉴스 제작"):
     # --- 이미지 생성 ---
     status.info("🎨 레이아웃 디자인 및 렌더링 중...")
     try:
-        web_fonts = get_web_resources()
-        def safe_font(font_bytes, size):
-            try: return ImageFont.truetype(io.BytesIO(font_bytes), size)
+        # [중요] 폰트 로컬 로드 (깨짐 방지)
+        font_paths = load_fonts_local()
+        
+        def safe_font(path, size):
+            try: return ImageFont.truetype(path, size)
             except: return ImageFont.load_default()
 
-        font_title = safe_font(load_asset_bytes(up_font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 95)
-        font_body = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 48)
-        font_small = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 30)
-        font_serif = safe_font(load_asset_bytes(up_font_serif, ASSET_FILENAMES['font_serif'], web_fonts['serif']), 90)
-        font_huge = safe_font(load_asset_bytes(up_font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 200)
+        font_title = safe_font(font_paths['title'], 95)
+        font_body = safe_font(font_paths['body'], 48)
+        font_small = safe_font(font_paths['body'], 30)
+        font_serif = safe_font(font_paths['serif'], 90)
+        font_huge = safe_font(font_paths['title'], 200)
         
-        img_symbol = load_logo_image(up_symbol, ASSET_FILENAMES['symbol'], 60)
-        img_logotxt = load_logo_image(up_text_logo, ASSET_FILENAMES['text'], 160)
+        # [중요] 로고 로컬 로드
+        img_symbol = load_local_image(LOGO_SYMBOL_PATH, 60)
+        img_logotxt = load_local_image(LOGO_TEXT_PATH, 160)
         
         final_images_pool = []
         
@@ -398,8 +395,7 @@ if st.button("🚀 카드뉴스 제작"):
         else:
             color_main = ai_suggested_color
 
-        bg_raw = final_images_pool[0].resize((CANVAS_W, CANVAS_H))
-        
+        # 아웃트로 배경
         try: bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color=color_main)
         except: bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color='#333333')
         
@@ -413,7 +409,7 @@ if st.button("🚀 카드뉴스 제작"):
         for i, slide in enumerate(slides):
             sType = slide.get('TYPE', 'CONTENT')
             
-            # 배경 이미지 순환 할당
+            # 배경 이미지 할당
             if sType == 'OUTRO':
                 img = bg_outro.copy()
             else:
@@ -430,6 +426,7 @@ if st.button("🚀 카드뉴스 제작"):
 
             draw = ImageDraw.Draw(img, 'RGBA')
             
+            # 로고 배치
             top_margin = 100 if is_story else 60
             if sType != 'OUTRO':
                 if img_symbol or img_logotxt:
@@ -483,12 +480,12 @@ if st.button("🚀 카드뉴스 제작"):
                     draw_rounded_box(draw, (80, start_y, CANVAS_W-80, start_y + box_h), 30, (0,0,0,160))
                     txt_y = start_y + 50
                     for line in h_lines:
-                        draw_text_with_shadow(draw, (120, txt_y), line, font_title, fill=title_color)
+                        draw.text((120, txt_y), line, font=font_title, fill=title_color)
                         txt_y += 110
                     draw.line((120, txt_y+10, 320, txt_y+10), fill=title_color, width=5)
                     txt_y += 40
                     for line in d_lines:
-                        draw_text_with_shadow(draw, (120, txt_y), line, font_body, fill="white")
+                        draw.text((120, txt_y), line, font=font_body, fill="white")
                         txt_y += 65
                 elif layout == 'BAR': 
                     total_h = (len(h_lines)*110) + (len(d_lines)*65) + 60
