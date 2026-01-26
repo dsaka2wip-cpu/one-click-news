@@ -14,7 +14,7 @@ import fitz  # PyMuPDF
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v12.4", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v12.5", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 설정 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -24,10 +24,20 @@ LOGO_TEXT_PATH = "segye_text.png"
 # [3] 함수 정의 구역
 # ==============================================================================
 
-# 3-1. 스크래핑 (품질 필터링 포함)
+# 3-1. 태그 추출 및 스크래핑
+def extract_tag_from_title(title):
+    """제목에서 [단독], [기획] 같은 태그를 추출하고 제목에서 제거함"""
+    match = re.search(r'\[(.*?)\]', title)
+    if match:
+        tag = match.group(1)
+        clean_title = title.replace(f"[{tag}]", "").strip()
+        return tag, clean_title
+    return None, title
+
 def advanced_scrape(url):
     title, text, top_image = "", "", ""
     raw_images = []
+    
     try:
         config = Config()
         config.browser_user_agent = 'Mozilla/5.0'
@@ -45,8 +55,9 @@ def advanced_scrape(url):
             resp = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(resp.text, 'html.parser')
             if not title: title = soup.find('title').text.strip()
-            meta = soup.find('meta', property='og:image')
-            if meta: top_image = meta['content']
+            if not top_image:
+                meta = soup.find('meta', property='og:image')
+                if meta: top_image = meta['content']
             text = soup.get_text(separator=' ', strip=True)[:5000]
             for img in soup.find_all('img'):
                 src = img.get('src')
@@ -60,7 +71,10 @@ def advanced_scrape(url):
         if 'icon' in img_url or 'logo' in img_url or 'banner' in img_url: continue
         valid_images.append(img_url)
 
-    return title, text, valid_images
+    # [NEW] 태그 분리
+    tag, clean_title = extract_tag_from_title(title)
+            
+    return tag, clean_title, text, valid_images
 
 # 3-2. 리소스 캐싱
 @st.cache_resource
@@ -116,10 +130,6 @@ def get_dominant_color(pil_img):
 def get_available_model():
     try:
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        priorities = ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-1.0-pro", "models/gemini-pro"]
-        for p in priorities:
-            for m in models:
-                if p in m: return m
         return models[0] if models else "models/gemini-pro"
     except: return "models/gemini-pro"
 
@@ -156,10 +166,26 @@ def create_smooth_gradient(width, height):
 def draw_text_with_stroke(draw, position, text, font, fill="white", stroke_fill="black", stroke_width=2):
     draw.text(position, text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
+# [NEW] 뱃지 그리기
+def draw_badge(draw, x, y, text, font, bg_color="#D90000", text_color="white"):
+    padding = 15
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    
+    # 빨간 박스
+    draw.rounded_rectangle(
+        (x, y, x + text_w + padding*2, y + text_h + padding + 10),
+        radius=10, fill=bg_color
+    )
+    # 글씨
+    draw.text((x + padding, y + 2), text, font=font, fill=text_color)
+    return x + text_w + padding*2 + 20 # 다음 요소 시작 X좌표 반환
+
 def wrap_text(text, font, max_width, draw):
     lines = []
     text = clean_text_spacing(text)
-    if not text: return ["(내용 없음)"]
+    if not text: return []
     for paragraph in text.split('\n'):
         if not paragraph.strip(): continue
         words = paragraph.split(' ')
@@ -194,76 +220,51 @@ def paste_hybrid_logo(bg_img, symbol, logotxt, x=50, y=50, gap=15):
         if symbol:
             target_y = y + (symbol.height - logotxt.height) // 2
         bg_img.paste(logotxt, (next_x, target_y), logotxt)
+    return next_x
 
 # ==============================================================================
-# [4] 사이드바 UI
+# [4] 메인 UI (순서: URL -> 버튼 -> 안내)
+# ==============================================================================
+st.title("📰 One-Click News (v12.5 Safe Layout)")
+
+url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
+run_button = st.button("🚀 카드뉴스 제작")
+
+with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세", expanded=True):
+    st.markdown("""
+    ### 🧠 1. Intelligence (맥락 인식 기획)
+    * **내러티브 구조화:** 'Hook(유입) - Content(전개) - Conclusion(결론)'의 8단 구성.
+    * **데이터 감지 (Big Number):** 수치(%, 금액 등)가 감지되면 인포그래픽 슬라이드로 변환.
+    * **[NEW] 태그 자동 감지:** 기사 제목의 [단독], [기획] 등을 인식해 뱃지로 표시.
+
+    ### 🎨 2. Design Engine (유동적 디자인)
+    * **멀티 포맷:** 인스타그램 피드(1:1) / 스토리(9:16) 지원.
+    * **Auto Color:** 사진에서 가장 어울리는 테마 색상 자동 추출.
+    * **[NEW] 안전형 레이아웃:** 텍스트가 절대 잘리지 않는 Top-Down 배치 방식 적용.
+
+    ### 🛡️ 3. Core Tech & SEO
+    * **자동 자산 로드:** 로고/폰트 서버 내장으로 깨짐 방지.
+    * **Visual SEO:** 인스타그램 최적화 해시태그 자동 생성.
+    * **Smart Dimming:** 배경 밝기 자동 조절로 가독성 확보.
+    """)
+
+st.markdown("---")
+
+# ==============================================================================
+# [5] 사이드바 설정
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ 설정")
     api_key = st.text_input("Google API Key", type="password")
     if api_key: genai.configure(api_key=api_key)
     st.markdown("---")
-
-    st.markdown("#### 📐 포맷(비율) 선택")
-    format_option = st.radio("제작할 사이즈를 선택하세요:", ["카드뉴스 (1:1)", "인스타 스토리 (9:16)"])
-    
-    if "9:16" in format_option:
-        CANVAS_W, CANVAS_H = 1080, 1920
-        is_story = True
-    else:
-        CANVAS_W, CANVAS_H = 1080, 1080
-        is_story = False
-        
+    format_option = st.radio("제작할 사이즈:", ["카드뉴스 (1:1)", "인스타 스토리 (9:16)"])
+    if "9:16" in format_option: CANVAS_W, CANVAS_H, is_story = 1080, 1920, True
+    else: CANVAS_W, CANVAS_H, is_story = 1080, 1080, False
     st.markdown("---")
-    
-    st.markdown("#### 🎨 자산 설정")
     user_image = st.file_uploader("대표 이미지 (선택)", type=['png', 'jpg', 'jpeg'])
-    
-    use_auto_color = st.checkbox("📸 사진에서 테마 색상 자동 추출", value=True)
-    
-    if os.path.exists(LOGO_SYMBOL_PATH) and os.path.exists(LOGO_TEXT_PATH):
-        st.success("✅ 로고 파일 준비됨")
-    else:
-        st.warning("⚠️ 로고 파일이 없습니다.")
-
-# ==============================================================================
-# [5] 메인 UI (순서: URL -> 버튼 -> 안내)
-# ==============================================================================
-st.title("📰 One-Click News (v12.4 Layout & UX Fix)")
-
-# 1. URL 입력
-url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
-
-# 2. 실행 버튼 (위로 이동)
-run_button = st.button("🚀 카드뉴스 제작")
-
-# 3. 안내문 (항상 펼침 + 최신 내용 반영)
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세", expanded=True):
-    st.markdown("""
-    이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI 기술**이 결합된 지능형 제작 도구입니다.
-    
-    ### 🧠 1. Intelligence (맥락 인식 기획)
-    * **내러티브 구조화:** 기사를 기계적으로 줄이지 않고, **'Hook(유입) - Content(전개) - Conclusion(결론)'**의 8단 구성으로 재창조합니다.
-    * **데이터 감지 (Big Number):** 기사 내 핵심 수치(%, 금액 등)가 감지되면, 이를 자동으로 포착하여 **인포그래픽(Data Visualization)** 슬라이드로 변환합니다.
-    * **모델 자동 우회 (Auto-Pilot):** 구글의 최신 AI 모델(Gemini 1.5 Flash)을 우선 사용하되, 연결이 불안정할 경우 자동으로 예비 모델로 전환하여 **실패 없는 제작**을 보장합니다.
-
-    ### 🎨 2. Design Engine (유동적 디자인)
-    * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 포맷을 즉시 전환하여 생성합니다.
-    * **지능형 컬러 피킹 (Auto Color):** 업로드된 보도사진의 **지배적인 색상(Dominant Color)**을 AI가 분석·추출하여, 사진과 가장 잘 어울리는 테마 컬러를 자동 적용합니다.
-    * **레이아웃 변주 시스템:** 텍스트 분량과 성격에 따라 **[박스형 / 바형 / 인용구형 / 빅넘버형]** 4가지 디자인을 유기적으로 섞어 지루함을 없앴습니다.
-
-    ### 🛡️ 3. Core Tech (안정성 & 디테일)
-    * **자동 자산 로드:** 로고 파일을 매번 올릴 필요 없이, 서버에 저장된 고화질 로고를 자동으로 불러옵니다.
-    * **타이포그래피 교정:** `3 . 1절`과 같은 어색한 띄어쓰기나 문장 부호 오류를 **정규표현식(Regex)** 엔진이 자동으로 교정합니다.
-    * **하이브리드 로고 시스템:** 심볼과 텍스트 로고를 분리하여 인식하고, 배경의 밝기에 따라 최적의 위치에 배치합니다.
-
-    ### 📸 4. Visual Context & SEO (New)
-    * **멀티 이미지 스크래핑:** 썸네일뿐만 아니라 **기사 본문의 모든 사진을 수집**하여, 슬라이드마다 서로 다른 배경을 배치해 시각적 풍부함을 더합니다.
-    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 **밝기를 자동으로 조절(Dimming)**하고 텍스트 외곽선(Stroke)을 강화했습니다.
-    * **Visual SEO (해시태그):** 인스타그램 등 소셜 미디어 유입을 극대화하기 위해, 기사 내용에 최적화된 **추천 해시태그**를 자동 생성합니다.
-    """)
-
-st.markdown("---")
+    use_auto_color = st.checkbox("📸 테마 색상 자동 추출", value=True)
+    if os.path.exists(LOGO_SYMBOL_PATH): st.success("✅ 로고 로드 완료")
 
 # ==============================================================================
 # [6] 메인 실행 로직
@@ -273,297 +274,223 @@ if run_button:
     if not url: st.error("URL 필요"); st.stop()
     
     status = st.empty()
-    status.info("📰 기사 분석 및 이미지 선별 중...")
+    status.info("📰 기사 분석 중...")
     
-    title, text, scraped_images = advanced_scrape(url)
+    # [수정] 태그 추출 추가
+    news_tag, title, text, scraped_images = advanced_scrape(url)
     
-    if len(text) < 50:
-        st.error("기사 본문 추출 실패.")
-        st.stop()
+    if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
     # --- AI 기획 ---
     try:
         model_name = get_available_model()
-        status.info(f"🤖 AI 기획 중... ({model_name})")
         model = genai.GenerativeModel(model_name)
         
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-
         prompt = f"""
-        당신은 세계일보의 뉴스 에디터입니다. 기사를 읽고 카드뉴스 8장을 기획하세요.
+        당신은 세계일보 에디터입니다. 기사를 카드뉴스 8장으로 기획하세요.
         [기사 제목] {title}
         [기사 내용] {text[:4000]}
         
-        [필수 규칙]
-        1. 무조건 8장(슬라이드)으로 구성.
-        2. 각 장의 DESC(본문)는 80자 내외로 충실하게 작성할 것. (절대 비워두지 말 것)
-        3. 기사에 숫자가 핵심이라면 TYPE을 'DATA'로 지정.
-        4. 마지막에 해시태그 5개 추천.
+        [규칙]
+        1. **각 장의 DESC(본문)는 80자 이상 풍부하게 작성.** (비어있으면 절대 안 됨)
+        2. 숫자가 핵심이면 TYPE: DATA.
+        3. 마지막에 해시태그 5개.
         
-        [출력 포맷]
-        COLOR_MAIN: #HexCode
-        HASHTAGS: #태그1 #태그2 ...
-        
+        [출력]
+        COLOR_MAIN: #Hex
+        HASHTAGS: #태그
         [SLIDE 1]
         TYPE: COVER
         HEAD: (제목)
-        DESC: (요약)
-        
-        ... (반복) ...
-        
-        [SLIDE 8]
-        TYPE: OUTRO
-        HEAD: First in, Last out
-        DESC: 세상을 보는 눈, 세계일보
+        DESC: (내용)
+        ...
         """
         
-        response = model.generate_content(prompt, safety_settings=safety_settings)
+        response = model.generate_content(prompt)
         res_text = response.text
         
         slides = []
-        current_slide = {}
-        ai_suggested_color = "#FFD700"
+        curr = {}
+        ai_color = "#FFD700"
         hashtags = ""
         
         for line in res_text.split('\n'):
             line = line.strip()
             if not line: continue
-            clean_line = line.replace('*', '').replace('#', '').strip()
+            clean = line.replace('*', '').replace('#', '').strip()
             
-            if "COLOR_MAIN" in clean_line:
-                parts = clean_line.split(":")
-                if len(parts) > 1: ai_suggested_color = validate_hex_color(parts[1].strip())
-            elif "HASHTAGS" in clean_line:
-                try: hashtags = line.split(":", 1)[1].strip()
-                except: hashtags = line
-            elif "[SLIDE" in clean_line:
-                if current_slide: slides.append(current_slide)
-                current_slide = {"HEAD": "제목 없음", "DESC": "내용 없음", "TYPE": "CONTENT"}
-            elif "TYPE:" in clean_line:
-                current_slide["TYPE"] = clean_line.split(":", 1)[1].strip()
-            elif "HEAD:" in clean_line:
-                current_slide["HEAD"] = clean_line.split(":", 1)[1].strip()
-            elif "DESC:" in clean_line:
-                current_slide["DESC"] = clean_line.split(":", 1)[1].strip()
-        if current_slide: slides.append(current_slide)
+            if "COLOR_MAIN" in clean: ai_color = validate_hex_color(clean.split(":")[1])
+            elif "HASHTAGS" in clean: hashtags = clean.split(":", 1)[1].strip()
+            elif "[SLIDE" in clean:
+                if curr: slides.append(curr)
+                curr = {"HEAD": "", "DESC": "", "TYPE": "CONTENT"}
+            elif "TYPE:" in clean: curr["TYPE"] = clean.split(":", 1)[1].strip()
+            elif "HEAD:" in clean: curr["HEAD"] = clean.split(":", 1)[1].strip()
+            elif "DESC:" in clean: curr["DESC"] = clean.split(":", 1)[1].strip()
+        if curr: slides.append(curr)
         
-        while len(slides) < 8:
-            slides.append({"TYPE": "CONTENT", "HEAD": "내용 없음", "DESC": "AI 오류"})
-            
-    except Exception as e: st.error(f"AI 기획 실패: {e}"); st.stop()
+        # [Fail-safe] 내용 비었으면 원문에서 채우기
+        if not slides: st.error("AI 응답 오류"); st.stop()
+        for s in slides:
+            if not s.get("DESC"): s["DESC"] = text[:100] + "..." # 비상 대책
 
-    # --- 이미지 생성 ---
-    status.info("🎨 이미지 렌더링 중...")
+    except Exception as e: st.error(f"AI 오류: {e}"); st.stop()
+
+    # --- 렌더링 ---
+    status.info("🎨 이미지 생성 중...")
     try:
         font_paths = load_fonts_local()
         def safe_font(path, size):
             try: return ImageFont.truetype(path, size)
             except: return ImageFont.load_default()
 
-        font_title = safe_font(font_paths['title'], 95)
-        font_body = safe_font(font_paths['body'], 48)
-        font_small = safe_font(font_paths['body'], 30)
-        font_serif = safe_font(font_paths['serif'], 90)
-        font_huge = safe_font(font_paths['title'], 200)
+        f_title = safe_font(font_paths['title'], 95)
+        f_body = safe_font(font_paths['body'], 48)
+        f_small = safe_font(font_paths['body'], 30)
+        f_serif = safe_font(font_paths['serif'], 90)
+        f_huge = safe_font(font_paths['title'], 200)
+        f_badge = safe_font(font_paths['body'], 35) # 뱃지용 폰트
         
-        img_symbol = load_local_image(LOGO_SYMBOL_PATH, 60)
-        img_logotxt = load_local_image(LOGO_TEXT_PATH, 160)
+        img_sym = load_local_image(LOGO_SYMBOL_PATH, 60)
+        img_txt = load_local_image(LOGO_TEXT_PATH, 160)
         
-        final_images_pool = []
+        # 이미지 풀
+        img_pool = []
         if user_image:
-            img_bytes = user_image.getvalue()
-            final_images_pool.append(Image.open(io.BytesIO(img_bytes)).convert('RGB'))
+            img_pool.append(Image.open(io.BytesIO(user_image.getvalue())).convert('RGB'))
         else:
-            for img_link in scraped_images:
+            for link in scraped_images:
                 try:
-                    resp = requests.get(img_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2)
-                    im = Image.open(io.BytesIO(resp.content)).convert('RGB')
-                    if im.width >= 300 and im.height >= 300:
-                        final_images_pool.append(im)
-                    if len(final_images_pool) >= 5: break
+                    r = requests.get(link, timeout=2)
+                    im = Image.open(io.BytesIO(r.content)).convert('RGB')
+                    if im.width >= 300: img_pool.append(im)
+                    if len(img_pool)>=5: break
                 except: continue
-        
-        if not final_images_pool:
-            final_images_pool.append(Image.new('RGB', (1080, 1080), color='#333333'))
+        if not img_pool: img_pool.append(Image.new('RGB', (1080, 1080), '#333'))
 
-        if use_auto_color: color_main = get_dominant_color(final_images_pool[0])
-        else: color_main = ai_suggested_color
-
-        try: bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color=color_main)
-        except: bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color='#333333')
+        color_main = get_dominant_color(img_pool[0]) if use_auto_color else ai_color
+        bg_outro = Image.new('RGB', (CANVAS_W, CANVAS_H), color_main)
         
         generated_images = []
         tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
         
-        layout_pattern = ['BOX', 'BAR', 'QUOTE']
-        random.shuffle(layout_pattern)
+        layouts = ['BOX', 'BAR', 'QUOTE']
         
         for i, slide in enumerate(slides):
             sType = slide.get('TYPE', 'CONTENT')
             
-            if sType == 'OUTRO':
-                img = bg_outro.copy()
+            # 배경
+            if sType == 'OUTRO': img = bg_outro.copy()
             else:
-                if len(final_images_pool) > 1:
-                    pool_idx = i % len(final_images_pool)
-                else:
-                    pool_idx = 0
-                
-                base_img = final_images_pool[pool_idx].copy().resize((CANVAS_W, CANVAS_H))
-                
+                base = img_pool[i % len(img_pool)].copy().resize((CANVAS_W, CANVAS_H))
                 if sType == 'COVER':
-                    img = ImageEnhance.Brightness(base_img).enhance(0.7)
+                    img = ImageEnhance.Brightness(base).enhance(0.7)
                     grad = create_smooth_gradient(CANVAS_W, CANVAS_H)
                     img.paste(grad, (0,0), grad)
                 else:
-                    img = base_img.filter(ImageFilter.GaussianBlur(20))
-                    img = ImageEnhance.Brightness(img).enhance(0.3)
+                    img = base.filter(ImageFilter.GaussianBlur(20))
+                    img = ImageEnhance.Brightness(img).enhance(0.3) # 아주 어둡게
 
             draw = ImageDraw.Draw(img, 'RGBA')
             
-            top_margin = 100 if is_story else 60
+            # 상단 로고 & 뱃지
+            top_y = 100 if is_story else 60
             if sType != 'OUTRO':
-                if img_symbol or img_logotxt:
-                    paste_hybrid_logo(img, img_symbol, img_logotxt, x=60, y=top_margin)
+                next_x = 60
+                if img_sym or img_txt:
+                    next_x = paste_hybrid_logo(img, img_sym, img_txt, x=60, y=top_y)
                 else:
-                    draw_text_with_stroke(draw, (60, top_margin), "SEGYE BRIEFING", font_small, fill=color_main)
-                draw_text_with_stroke(draw, (CANVAS_W-130, top_margin), f"{i+1} / {len(slides)}", font_small)
+                    draw.text((60, top_y), "SEGYE BRIEFING", f_small, fill=color_main)
+                    next_x = 300
+                
+                # [NEW] 뱃지 그리기 (로고 옆에)
+                if news_tag:
+                    draw_badge(draw, next_x + 10, top_y + 10, news_tag, f_badge)
+                
+                draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
-            # [핵심 수정] 좌표 계산 로직 개선 (텍스트 오버플로우 방지)
+            # --- 내용 그리기 (Safe Layout 적용) ---
+            head = clean_text_spacing(slide.get('HEAD', ''))
+            desc = clean_text_spacing(slide.get('DESC', ''))
+            
+            # 1. COVER: 하단 고정
             if sType == 'COVER':
-                head = clean_text_spacing(slide.get('HEAD', ''))
-                desc = clean_text_spacing(slide.get('DESC', ''))
+                d_lines = wrap_text(desc, f_body, CANVAS_W-100, draw)
+                # 바닥에서 150px 띄우고 시작
+                curr_y = CANVAS_H - 150 - (len(d_lines)*60)
+                for l in d_lines:
+                    draw_text_with_stroke(draw, (60, curr_y), l, f_body, stroke_width=2)
+                    curr_y += 60
                 
-                # 본문 높이 계산
-                d_lines = wrap_text(desc, font_body, CANVAS_W-100, draw)
-                desc_h = len(d_lines) * 60
-                
-                # 제목 높이 계산
-                h_lines = wrap_text(head, font_title, CANVAS_W-100, draw)
-                head_h = len(h_lines) * 110
-                
-                # 전체 텍스트 높이
-                total_text_h = desc_h + head_h + 100 # 여백 포함
-                
-                # 시작점 계산 (바닥에서 올라오되, 천장을 뚫으면 천장에 고정)
-                calculated_y = CANVAS_H - 150 - desc_h - 40 - head_h
-                if calculated_y < 150: # 로고 영역 침범 시
-                    calculated_y = 150 # 강제 고정
-                
-                # 그리기 시작 (제목부터)
-                curr_y = calculated_y
-                for line in h_lines:
-                    draw_text_with_stroke(draw, (60, curr_y), line, font_title, fill="white", stroke_width=3)
-                    curr_y += 110
-                
-                curr_y += 20
+                curr_y -= (len(d_lines)*60 + 40)
                 draw.rectangle([(60, curr_y), (160, curr_y+10)], fill=color_main)
-                curr_y += 40
                 
-                for line in d_lines:
-                    draw_text_with_stroke(draw, (60, curr_y), line, font_body, fill="#eeeeee", stroke_width=2)
+                h_lines = wrap_text(head, f_title, CANVAS_W-100, draw)
+                curr_y -= (len(h_lines)*110 + 20)
+                for l in h_lines:
+                    draw_text_with_stroke(draw, (60, curr_y), l, f_title, stroke_width=3)
+                    curr_y += 110
+
+            # 2. DATA (빅 넘버): 중앙
+            elif sType == 'DATA':
+                bbox = draw.textbbox((0,0), head, font=f_huge)
+                w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+                draw_text_with_stroke(draw, ((CANVAS_W-w)//2, (CANVAS_H-h)//2 - 100), head, f_huge, fill=color_main, stroke_width=4)
+                
+                d_lines = wrap_text(desc, f_body, 800, draw)
+                curr_y = (CANVAS_H//2) + 100
+                for l in d_lines:
+                    lw = draw.textlength(l, font=f_body)
+                    draw_text_with_stroke(draw, ((CANVAS_W-lw)//2, curr_y), l, f_body, stroke_width=2)
                     curr_y += 60
 
-            elif sType == 'DATA':
-                head = clean_text_spacing(slide.get('HEAD', ''))
-                desc = clean_text_spacing(slide.get('DESC', ''))
-                bbox = draw.textbbox((0,0), head, font=font_huge)
-                num_w, num_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                center_x, center_y = (CANVAS_W - num_w) // 2, (CANVAS_H - num_h) // 2 - 100
-                draw_text_with_stroke(draw, (center_x, center_y), head, font_huge, fill=color_main, stroke_width=4)
-                d_lines = wrap_text(desc, font_body, 800, draw)
-                desc_y = center_y + num_h + 50
-                for line in d_lines:
-                    lw = draw.textlength(line, font=font_body)
-                    draw_text_with_stroke(draw, ((CANVAS_W-lw)//2, desc_y), line, font_body, stroke_width=2)
-                    desc_y += 60
-
+            # 3. CONTENT: 상단 고정 (Top-Down) -> 절대 안 잘림
             elif sType == 'CONTENT':
-                layout = layout_pattern[i % 3]
-                head = clean_text_spacing(slide.get('HEAD', ''))
-                desc = clean_text_spacing(slide.get('DESC', ''))
-                h_lines = wrap_text(head, font_title, CANVAS_W-180, draw)
-                d_lines = wrap_text(desc, font_body, CANVAS_W-180, draw)
+                # 무조건 위에서 250px 내려온 지점부터 그림
+                start_y = 250 if not is_story else 350
                 
-                if layout == 'BOX': 
-                    box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
-                    start_y = (CANVAS_H - box_h) // 2
-                    if start_y < 150: start_y = 150 # 상단 침범 방지
-                    
-                    draw_rounded_box(draw, (80, start_y, CANVAS_W-80, start_y + box_h), 30, (0,0,0,160))
-                    txt_y = start_y + 50
-                    for line in h_lines:
-                        draw_text_with_stroke(draw, (120, txt_y), line, font_title, fill=title_color, stroke_width=0)
-                        txt_y += 110
-                    draw.line((120, txt_y+10, 320, txt_y+10), fill=title_color, width=5)
-                    txt_y += 40
-                    for line in d_lines:
-                        draw_text_with_stroke(draw, (120, txt_y), line, font_body, fill="white", stroke_width=0)
-                        txt_y += 65
-                elif layout == 'BAR': 
-                    total_h = (len(h_lines)*110) + (len(d_lines)*65) + 60
-                    start_y = (CANVAS_H - total_h) // 2
-                    if start_y < 150: start_y = 150
-                    
-                    draw.rectangle([(80, start_y), (95, start_y + total_h)], fill=color_main)
-                    txt_y = start_y
-                    for line in h_lines:
-                        draw_text_with_stroke(draw, (120, txt_y), line, font_title, stroke_width=3)
-                        txt_y += 110
-                    txt_y += 30
-                    for line in d_lines:
-                        draw_text_with_stroke(draw, (120, txt_y), line, font_body, fill="#dddddd", stroke_width=2)
-                        txt_y += 65
-                elif layout == 'QUOTE': 
-                    start_y = (CANVAS_H // 3)
-                    draw.text((80, start_y - 150), "“", font=font_serif, fill=(255,255,255,50), font_size=300) 
-                    for line in h_lines:
-                        draw_text_with_stroke(draw, (150, start_y), line, font_title, stroke_width=3)
-                        start_y += 110
-                    draw.line((150, start_y+20, 350, start_y+20), fill=color_main, width=5)
-                    start_y += 60
-                    for line in d_lines:
-                        draw_text_with_stroke(draw, (150, start_y), line, font_body, fill="#cccccc", stroke_width=2)
-                        start_y += 65
+                # 제목
+                h_lines = wrap_text(head, f_title, CANVAS_W-120, draw)
+                for l in h_lines:
+                    draw_text_with_stroke(draw, (60, start_y), l, f_title, fill=color_main, stroke_width=2)
+                    start_y += 110
+                
+                # 구분선
+                draw.line((60, start_y, 200, start_y), fill="white", width=5)
+                start_y += 50
+                
+                # 본문
+                d_lines = wrap_text(desc, f_body, CANVAS_W-120, draw)
+                for l in d_lines:
+                    draw_text_with_stroke(draw, (60, start_y), l, f_body, fill="white", stroke_width=2)
+                    start_y += 65
 
+            # 4. OUTRO
             elif sType == 'OUTRO':
-                out_color = "white" if is_color_dark(color_main) else "black"
+                out_c = "white" if is_color_dark(color_main) else "black"
                 slogan = "First in, Last out"
-                bbox = draw.textbbox((0,0), slogan, font=font_serif)
-                w = bbox[2] - bbox[0]
-                draw.text(((CANVAS_W-w)/2, CANVAS_H//3), slogan, font=font_serif, fill=out_color)
-                brand = "세상을 보는 눈, 세계일보"
-                bbox2 = draw.textbbox((0,0), brand, font=font_body)
-                w2 = bbox2[2] - bbox2[0]
-                draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=font_body, fill=out_color)
-                qr_img = generate_qr_code(url).resize((220, 220))
-                qr_x = (CANVAS_W - 240) // 2
-                qr_y = CANVAS_H//3 + 300
-                draw.rounded_rectangle((qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
-                img.paste(qr_img, (qr_x+10, qr_y+10))
-                msg = "기사 원문 보러가기"
-                bbox3 = draw.textbbox((0, 0), msg, font=font_small)
-                w3 = bbox3[2] - bbox3[0]
-                draw.text(((CANVAS_W-w3)/2, qr_y + 260), msg, font=font_small, fill=out_color)
+                w = draw.textlength(slogan, font=f_serif)
+                draw.text(((CANVAS_W-w)/2, CANVAS_H//3), slogan, f_serif, fill=out_c)
+                
+                qr = generate_qr_code(url).resize((250, 250))
+                qx = (CANVAS_W-250)//2
+                qy = CANVAS_H//2
+                draw.rounded_rectangle((qx, qy, qx+250, qy+250), 20, "white")
+                img.paste(qr, (qx+10, qy+10))
 
             generated_images.append(img)
             with tabs[i]: st.image(img)
 
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w") as zf:
+        # 다운로드
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w") as zf:
             for i, img in enumerate(generated_images):
-                img_byte_arr = io.BytesIO()
-                img.save(img_byte_arr, format='PNG')
-                zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
+                ib = io.BytesIO()
+                img.save(ib, format='PNG')
+                zf.writestr(f"card_{i+1:02d}.png", ib.getvalue())
         
-        st.success("✅ 제작 완료! 해시태그를 복사해서 쓰세요.")
-        st.code(hashtags, language="text")
-        
-        st.download_button("💾 카드뉴스 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_complete.zip", "application/zip", use_container_width=True)
+        st.success("✅ 완료! 해시태그 복사:")
+        st.code(hashtags)
+        st.download_button("💾 다운로드", zip_buf.getvalue(), "segye_news.zip", "application/zip", use_container_width=True)
 
-    except Exception as e: st.error(f"이미지 생성 중 오류 발생: {e}")
+    except Exception as e: st.error(f"오류: {e}")
