@@ -14,15 +14,25 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v13.7", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v13.8", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
 LOGO_TEXT_PATH = "segye_text.png"
 
 # ==============================================================================
-# [3] 유틸리티 함수
+# [3] 유틸리티 및 그리기 함수 정의 (에러 방지를 위해 최상단 배치)
 # ==============================================================================
+
+def is_color_dark(hex_color):
+    """배경색이 어두운지 판별 (흰색 글씨 쓸지 검은색 글씨 쓸지 결정)"""
+    try:
+        hex_color = str(hex_color).lstrip('#')
+        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        # 밝기 공식 (YIQ)
+        return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) < 128
+    except:
+        return False # 기본적으로 밝다고 가정
 
 def extract_tag_from_title(title):
     match = re.search(r'\[(.*?)\]', title)
@@ -166,7 +176,6 @@ def draw_pill_badge(draw, x, y, text, font, bg_color="#C80000"):
     
     draw.text((x + padding_x, y + padding_y - 2), text, font=font, fill="white")
 
-# [수정] 변수명 오타 수정 (curr -> current_line)
 def wrap_text(text, font, max_width, draw):
     lines = []
     text = clean_text_spacing(text)
@@ -174,7 +183,7 @@ def wrap_text(text, font, max_width, draw):
     for para in text.split('\n'):
         if not para.strip(): continue
         words = para.split(' ')
-        current_line = words[0] # [Fix] 변수명 통일
+        current_line = words[0] # 변수명 통일
         for word in words[1:]:
             bbox = draw.textbbox((0, 0), current_line + " " + word, font=font)
             if bbox[2] - bbox[0] <= max_width: current_line += " " + word
@@ -217,7 +226,7 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v13.7 Bug Fix)")
+st.title("📰 One-Click News (v13.8 Final Integrity Fix)")
 
 # 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -290,7 +299,7 @@ if run_button:
             model = genai.GenerativeModel(model_name)
             
             prompt = f"""
-            당신은 세계일보 전문 에디터이자 아트 디렉터입니다. 기사를 SNS용 카드뉴스 8장으로 기획하세요.
+            당신은 세계일보 전문 에디터입니다. 기사를 SNS용 카드뉴스 8장으로 기획하세요.
             [제목] {title}
             [내용] {text[:4000]}
             
@@ -352,7 +361,7 @@ if run_button:
             
             if len(slides) >= 8: slides[7] = {"TYPE": "OUTRO", "HEAD":"", "DESC":""}
             while len(slides) < 8:
-                 slides.append({"TYPE": "OUTRO" if len(slides)==7 else "BOX", "HEAD":"제목 없음", "DESC":"내용 없음"})
+                 slides.append({"TYPE": "OUTRO" if len(slides)==7 else "BOX", "HEAD":"", "DESC":""})
 
         except Exception as e: st.error(f"AI 오류: {e}"); st.stop()
 
@@ -396,7 +405,6 @@ if run_button:
             for i, slide in enumerate(slides):
                 sType = slide.get('TYPE', 'BOX').upper()
                 
-                # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
                 else:
                     base = img_pool[i % len(img_pool)].copy().resize((CANVAS_W, CANVAS_H))
@@ -414,7 +422,7 @@ if run_button:
                 top_y = 100 if is_story else 60
                 if sType != 'OUTRO':
                     next_x = 60
-                    logo_height = 40 # 기본값
+                    logo_height = 40 
                     
                     if img_sym or img_txt:
                         next_x, logo_height = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
@@ -429,10 +437,10 @@ if run_button:
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
-                # 내용 그리기
+                # 내용 그리기 (여백 100px)
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
-                content_width = CANVAS_W - 240 
+                content_width = CANVAS_W - 200 
                 
                 if sType == 'COVER':
                     d_lines = wrap_text(desc, f_body, content_width, draw)
