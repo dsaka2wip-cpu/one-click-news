@@ -14,11 +14,11 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v10.3", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (Final Production)")
-st.markdown("### 💎 로고/본문/모델 연결 완벽 수정 버전")
+st.set_page_config(page_title="One-Click News v10.4", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v10.4 Variable Fix)")
+st.markdown("### 💎 변수 충돌 해결 & 안정성 강화 버전")
 
-# --- [설정] 서버 파일명 (자동 로드용) ---
+# --- [설정] 서버 파일명 ---
 ASSET_FILENAMES = {
     "symbol": "segye_symbol.png",
     "text": "segye_text.png",
@@ -38,28 +38,39 @@ def get_web_resources():
     except: return None
     return resources
 
+# --- [핵심 수정] 안전한 자산 로더 ---
 def load_asset_bytes(uploader, filename, fallback_bytes=None):
-    if uploader: return uploader.getvalue()
+    # 1. 업로더가 있고, 실제 파일 객체인지 확인 (에러 방지 핵심)
+    if uploader and hasattr(uploader, 'getvalue'):
+        return uploader.getvalue()
+    # 2. 로컬 파일 확인
     if os.path.exists(filename):
         with open(filename, "rb") as f: return f.read()
+    # 3. 기본값 반환
     return fallback_bytes
 
 def load_logo_image(uploader, filename, width_target):
     data = load_asset_bytes(uploader, filename)
     if not data: return None
     try:
-        if filename.lower().endswith('.ai') or (uploader and uploader.name.lower().endswith('.ai')):
+        # AI 파일 대응
+        is_ai = False
+        if filename.lower().endswith('.ai'): is_ai = True
+        if uploader and hasattr(uploader, 'name') and uploader.name.lower().endswith('.ai'): is_ai = True
+            
+        if is_ai:
             doc = fitz.open(stream=data, filetype="pdf")
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
             img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
         else:
             img = Image.open(io.BytesIO(data)).convert("RGBA")
+        
         ar = img.height / img.width
         return img.resize((width_target, int(width_target * ar)))
     except: return None
 
-# --- [핵심] 모델 자동 탐색 ---
+# --- 모델 자동 탐색 ---
 def get_available_model():
     try:
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -172,7 +183,7 @@ def advanced_scrape(url):
         except: pass
     return title, text, top_image
 
-# --- 사이드바 ---
+# --- 사이드바 (변수명 충돌 해결) ---
 with st.sidebar:
     st.header("⚙️ 설정")
     api_key = st.text_input("Google API Key", type="password")
@@ -181,14 +192,14 @@ with st.sidebar:
     user_image = st.file_uploader("기사 사진 (1순위)", type=['png', 'jpg', 'jpeg'])
     
     st.markdown("#### 🎨 로고 & 폰트")
-    st.caption("※ 폴더에 파일이 있으면 자동 적용, 없으면 아래 업로드")
-    symbol_file = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
-    text_logo_file = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
+    # [수정] 변수명을 up_ 접두어로 구분
+    up_symbol = st.file_uploader("세계일보 심볼 (AI/PNG)", type=['png', 'ai'])
+    up_text_logo = st.file_uploader("세계일보 텍스트로고 (AI/PNG)", type=['png', 'ai'])
     
     with st.expander("폰트 수동 변경"):
-        font_title = st.file_uploader("제목 폰트", type=['ttf', 'otf'])
-        font_body = st.file_uploader("본문 폰트", type=['ttf', 'otf'])
-        font_serif = st.file_uploader("명조 폰트", type=['ttf', 'otf'])
+        up_font_title = st.file_uploader("제목 폰트", type=['ttf', 'otf'])
+        up_font_body = st.file_uploader("본문 폰트", type=['ttf', 'otf'])
+        up_font_serif = st.file_uploader("명조 폰트", type=['ttf', 'otf'])
 
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
@@ -205,7 +216,7 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
     # --- AI 기획 ---
     try:
         model_name = get_available_model()
-        status.info(f"🤖 AI 모델({model_name})에 연결했습니다. 기획 중...")
+        status.info(f"🤖 AI 모델({model_name}) 연결. 기획 중...")
         model = genai.GenerativeModel(model_name)
         
         safety_settings = [
@@ -285,13 +296,14 @@ if st.button("🚀 카드뉴스 제작 (Final)"):
             try: return ImageFont.truetype(io.BytesIO(font_bytes), size)
             except: return ImageFont.load_default()
 
-        font_title = safe_font(load_asset_bytes(font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 95)
-        font_body = safe_font(load_asset_bytes(font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 48)
-        font_small = safe_font(load_asset_bytes(font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 30)
-        font_serif = safe_font(load_asset_bytes(font_serif, ASSET_FILENAMES['font_serif'], web_fonts['serif']), 90)
+        # [수정] 업로더 변수(up_~)와 폰트객체(font_~) 이름 구분
+        font_title = safe_font(load_asset_bytes(up_font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 95)
+        font_body = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 48)
+        font_small = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 30)
+        font_serif = safe_font(load_asset_bytes(up_font_serif, ASSET_FILENAMES['font_serif'], web_fonts['serif']), 90)
         
-        img_symbol = load_logo_image(symbol_file, ASSET_FILENAMES['symbol'], 60)
-        img_logotxt = load_logo_image(text_logo_file, ASSET_FILENAMES['text'], 160)
+        img_symbol = load_logo_image(up_symbol, ASSET_FILENAMES['symbol'], 60)
+        img_logotxt = load_logo_image(up_text_logo, ASSET_FILENAMES['text'], 160)
         
         if user_image:
             bg_raw = Image.open(user_image).convert('RGB')
