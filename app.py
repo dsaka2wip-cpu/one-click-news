@@ -14,7 +14,7 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v14.0", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v14.1", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -34,9 +34,9 @@ def is_color_dark(hex_color):
 def clean_text_spacing(text):
     if not text: return ""
     text = text.strip()
-    # [NEW] 빈 괄호 삭제 ( ) 또는 ()
+    # 빈 괄호 삭제
     text = re.sub(r'\(\s*\)', '', text)
-    # 마침표 뒤 띄어쓰기
+    # 마침표/쉼표 뒤 띄어쓰기
     text = re.sub(r'(?<=[가-힣])\.(?=[가-힣a-zA-Z])', '. ', text)
     text = re.sub(r'(?<=[가-힣])\,(?=[가-힣a-zA-Z])', ', ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -224,34 +224,32 @@ def generate_qr_code(link):
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white").convert("RGBA")
 
-# [수정] 로고 붙여넣기 및 높이 정보 정확히 반환
+# [수정] 반환값 2개로 고정 (Error Fix)
 def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     check_area = (x, y, x+300, y+100)
     brightness = check_brightness(bg_img, check_area)
     use_white = brightness < 100
     
     next_x = x
-    symbol_h = 0
-    text_h = 0
+    logo_height = 0
     
     if symbol:
         sym_to_paste = recolor_image_to_white(symbol) if use_white else symbol
         bg_img.paste(sym_to_paste, (x, y), sym_to_paste)
         next_x += symbol.width + 15
-        symbol_h = symbol.height
+        logo_height = max(logo_height, symbol.height)
     
     if logotxt:
         txt_to_paste = recolor_image_to_white(logotxt) if use_white else logotxt
-        # 심볼이 있으면 심볼 높이 기준으로 수직 중앙 정렬
         target_y = y
         if symbol:
             target_y = y + (symbol.height - logotxt.height) // 2
         
         bg_img.paste(txt_to_paste, (next_x, target_y), txt_to_paste)
         next_x += logotxt.width
-        text_h = logotxt.height
+        logo_height = max(logo_height, logotxt.height)
         
-    return next_x, text_h, use_white # 텍스트 로고 높이 반환
+    return next_x, logo_height
 
 def draw_rounded_box(draw, xy, radius, fill):
     draw.rounded_rectangle(xy, radius=radius, fill=fill)
@@ -259,13 +257,12 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v14.0 The Perfection)")
+st.title("📰 One-Click News (v14.1 Hotfix Final)")
 
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 run_button = st.button("🚀 카드뉴스 제작")
 result_container = st.container()
 
-# [수정] 안내문 완전 복구 (Full Spec)
 st.markdown("---")
 with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Full Spec)", expanded=True):
     st.markdown("""
@@ -327,7 +324,6 @@ if run_button:
             model_name = get_available_model()
             model = genai.GenerativeModel(model_name)
             
-            # [수정] 본문 분량 90~110자로 조절
             prompt = f"""
             당신은 세계일보 전문 에디터입니다. 기사를 읽고 SNS용 카드뉴스 8장을 기획하세요.
             [제목] {title}
@@ -435,7 +431,6 @@ if run_button:
             for i, slide in enumerate(slides):
                 sType = slide.get('TYPE', 'BOX').upper()
                 
-                # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
                 else:
                     base = img_pool[i % len(img_pool)].copy().resize((CANVAS_W, CANVAS_H))
@@ -453,27 +448,19 @@ if run_button:
                 top_y = 100 if is_story else 60
                 if sType != 'OUTRO':
                     next_x = 60
-                    text_logo_h = 40 # 기본값
+                    logo_height = 40 
                     
                     if img_sym or img_txt:
-                        next_x, text_logo_h = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
+                        next_x, logo_height = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
                         next_x += 25
                     else:
                         draw.text((60, top_y), "SEGYE BRIEFING", font=f_small, fill=color_main)
                         next_x = 320
 
                     if news_tag:
-                        # [수정] 텍스트 로고 높이의 정중앙에 뱃지 중앙을 맞춤
-                        badge_h = 47 # 뱃지 높이
-                        # 로고의 중앙 Y 좌표 = top_y + (text_logo_h / 2)
-                        # 뱃지의 시작 Y 좌표 = 로고 중앙 Y - (뱃지 높이 / 2)
-                        # 심볼이 있는 경우 텍스트 로고가 심볼 중앙에 오도록 paste_logo_smart에서 조정됨
-                        # 따라서 text_logo_h를 기준으로 잡으면 정확함
-                        badge_y = top_y + (text_logo_h // 2) - (badge_h // 2)
-                        
-                        # 미세 보정 (심볼이 있을때 약간 내려가는 경향 보정)
+                        badge_h = 47 
+                        badge_y = top_y + (logo_height // 2) - (badge_h // 2)
                         if img_sym: badge_y += 5 
-                        
                         draw_pill_badge(draw, next_x, badge_y, news_tag, f_badge, bg_color="#C80000")
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
@@ -546,22 +533,13 @@ if run_button:
                     brand = "세상을 보는 눈, 세계일보"
                     w2 = draw.textlength(brand, font=f_body)
                     draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=f_body, fill=out_c)
-                    
-                    # [수정] QR 코드 정중앙 배치
-                    qr_size = 220
-                    box_size = 260
-                    qx = (CANVAS_W - box_size) // 2
-                    qy = CANVAS_H // 3 + 300
-                    
-                    draw.rounded_rectangle((qx, qy, qx+box_size, qy+box_size), 20, "white")
-                    
-                    qr_img = generate_qr_code(url).resize((qr_size, qr_size)).convert("RGBA")
-                    offset = (box_size - qr_size) // 2
-                    img.paste(qr_img, (qx+offset, qy+offset), qr_img)
-                    
+                    qr = generate_qr_code(url).resize((250, 250)) # RGBA
+                    qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
+                    draw.rounded_rectangle((qx, qy, qx+250, qy+250), 20, "white")
+                    img.paste(qr, (qx+10, qy+10), qr) # Mask
                     msg = "기사 원문 보러가기"
                     w3 = draw.textlength(msg, font=f_small)
-                    draw.text(((CANVAS_W-w3)/2, qy + box_size + 20), msg, font=f_small, fill=out_c)
+                    draw.text(((CANVAS_W-w3)/2, qy + 270), msg, font=f_small, fill=out_c)
 
                 else: # BOX
                     start_y = 250 if not is_story else 350
