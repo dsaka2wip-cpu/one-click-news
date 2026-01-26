@@ -3,7 +3,7 @@ import google.generativeai as genai
 from newspaper import Article, Config
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageColor
 import io
 import random
 import zipfile
@@ -11,11 +11,12 @@ import qrcode
 import os
 import numpy as np
 import fitz  # PyMuPDF
+import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.3", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.3 Final Fix)")
-st.markdown("### 💎 디자인 완성 & 에러 완전 해결")
+st.set_page_config(page_title="One-Click News v9.4", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.4 Color Safe)")
+st.markdown("### 💎 AI 색상 오류 방지 & 안전장치 탑재")
 
 # --- 리소스 캐싱 ---
 @st.cache_resource
@@ -29,7 +30,25 @@ def get_resources():
     except: return None
     return resources
 
-# --- 디자인 유틸리티 (에러 수정됨) ---
+# --- [NEW] 색상 검증 함수 (에러 방지 핵심) ---
+def validate_hex_color(color_str):
+    """
+    AI가 준 색상 코드가 유효한지 확인하고, 이상하면 기본값(#FFD700) 반환
+    """
+    try:
+        # 1. 텍스트에서 #XXXXXX 형태만 추출 (정규표현식)
+        match = re.search(r'#(?:[0-9a-fA-F]{3}){1,2}', str(color_str))
+        if match:
+            hex_code = match.group(0)
+            # 2. PIL이 인식 가능한지 테스트
+            ImageColor.getrgb(hex_code) 
+            return hex_code
+        else:
+            return "#FFD700" # 추출 실패시 골드
+    except:
+        return "#FFD700" # 에러 발생시 골드
+
+# --- 디자인 유틸리티 ---
 def add_noise_texture(img, intensity=0.05):
     if img.mode != 'RGBA': img = img.convert('RGBA')
     width, height = img.size
@@ -37,7 +56,6 @@ def add_noise_texture(img, intensity=0.05):
     noise[:, :, 3] = int(255 * intensity)
     return Image.alpha_composite(img, Image.fromarray(noise, 'RGBA'))
 
-# [수정 1] 변수명 r -> radius로 통일
 def draw_rounded_box(draw, xy, radius, fill):
     draw.rounded_rectangle(xy, radius=radius, fill=fill)
 
@@ -90,10 +108,12 @@ def render_ai_to_image(ai_bytes):
     except: return None
 
 def is_color_dark(hex_color):
-    hex_color = hex_color.lstrip('#')
-    if len(hex_color) != 6: return False
-    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 120
+    try:
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) != 6: return False
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 120
+    except: return False
 
 def paste_hybrid_logo(bg_img, symbol, logotxt, x=50, y=50, gap=15):
     next_x = x
@@ -163,8 +183,12 @@ if st.button("🚀 카드뉴스 제작"):
     try:
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         prompt = f"""
-        당신은 세계일보의 '디지털 스토리텔링 에디터'입니다.
-        [기사] 제목: {title} / 내용: {text[:6000]}
+        당신은 세계일보의 '비주얼 에디터'입니다.
+        
+        [기사]
+        제목: {title}
+        내용: {text[:6000]}
+        
         [규칙]
         1. **총 8장 (Cover 1 + Story 6 + Outro 1)**
         2. **Cover:** HEAD(10자 이내 훅), DESC(40자 이내 요약)
@@ -172,8 +196,10 @@ if st.button("🚀 카드뉴스 제작"):
            - HEAD: 10자 이내 핵심 키워드
            - DESC: 80~100자 내외의 **꽉 찬** 설명.
         4. **Color:** 기사 분위기에 맞는 짙은 색상(Hex) 1개.
-        [출력]
+        
+        [출력 양식]
         COLOR_MAIN: #Hex
+        
         [SLIDE 1]
         TYPE: COVER
         HEAD: ...
@@ -189,7 +215,8 @@ if st.button("🚀 카드뉴스 제작"):
         
         slides = []
         curr = {}
-        color_main = "#FFD700"
+        # [수정] 기본값 설정
+        color_main = "#FFD700" 
         
         for line in res_text.split('\n'):
             line = line.strip()
@@ -197,7 +224,11 @@ if st.button("🚀 카드뉴스 제작"):
             
             clean_line = line.replace('*', '').strip() 
             
-            if clean_line.startswith("COLOR_MAIN:"): color_main = clean_line.split(":")[1].strip()
+            if clean_line.startswith("COLOR_MAIN:"):
+                # [수정] 색상 파싱 후 즉시 검증
+                raw_color = clean_line.split(":")[1].strip()
+                color_main = validate_hex_color(raw_color)
+                
             elif "[SLIDE" in clean_line:
                 if curr: slides.append(curr)
                 curr = {"HEAD": "", "DESC": "", "TYPE": ""}
@@ -249,6 +280,7 @@ if st.button("🚀 카드뉴스 제작"):
         bg_blur = bg_blur.filter(ImageFilter.GaussianBlur(15))
         bg_blur = ImageEnhance.Brightness(bg_blur).enhance(0.7)
         
+        # [수정] color_main이 검증된 상태라 안전함
         try: bg_outro = Image.new('RGB', (1080, 1080), color=color_main)
         except: bg_outro = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         bg_outro = add_noise_texture(bg_outro, 0.03)
@@ -268,6 +300,7 @@ if st.button("🚀 카드뉴스 제작"):
         else: img = bg_blur.copy()
             
         draw = ImageDraw.Draw(img, 'RGBA')
+        
         ft_head = ImageFont.truetype(io.BytesIO(b_title), 95)
         ft_desc = ImageFont.truetype(io.BytesIO(b_body), 48)
         ft_small = ImageFont.truetype(io.BytesIO(b_body), 30)
@@ -291,7 +324,10 @@ if st.button("🚀 카드뉴스 제작"):
                 draw_text_with_shadow(draw, (50, curr_y), line, ft_desc, fill="#eeeeee")
                 curr_y += 60
             curr_y -= (desc_h + 30)
+            
+            # [수정] 여기가 에러 발생 지점이었음. color_main이 안전해져서 에러 안 남.
             draw.rectangle([(50, curr_y), (150, curr_y+10)], fill=color_main)
+            
             h_lines = wrap_text(head, ft_head, 980, draw)
             head_h = len(h_lines) * 110
             curr_y -= (head_h + 30)
@@ -364,7 +400,6 @@ if st.button("🚀 카드뉴스 제작"):
             qr_img = generate_qr_code(url).resize((220, 220))
             qr_x = (1080 - 240) // 2
             qr_y = 650
-            # [수정 2] radius=20 키워드 인수 사용
             draw_rounded_box(draw, (qr_x, qr_y, qr_x+240, qr_y+240), radius=20, fill="white")
             img.paste(qr_img, (qr_x+10, qr_y+10))
             
@@ -383,4 +418,4 @@ if st.button("🚀 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_fix.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_safe.zip", "application/zip", use_container_width=True)
