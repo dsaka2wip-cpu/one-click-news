@@ -14,7 +14,7 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v13.2", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v13.3", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -191,18 +191,12 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v13.2 Syntax Fix)")
+st.title("📰 One-Click News (v13.3 Syntax Fixed)")
 
-# 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
-
-# 2. 실행 버튼
 run_button = st.button("🚀 카드뉴스 제작")
-
-# 3. 결과 표시 컨테이너
 result_container = st.container()
 
-# 4. 상세 안내문
 st.markdown("---")
 with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Full Spec)", expanded=True):
     st.markdown("""
@@ -255,7 +249,7 @@ if run_button:
         news_tag, title, text, scraped_images = advanced_scrape(url)
         if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-        # --- AI 기획 (레이아웃 결정권 부여) ---
+        # --- AI 기획 ---
         try:
             model_name = get_available_model()
             model = genai.GenerativeModel(model_name)
@@ -271,12 +265,12 @@ if run_button:
             2. **TYPE: DATA** -> 숫자, 통계, 금액, 날짜 등 수치가 핵심일 때.
             3. **TYPE: BAR** -> 핵심 요약, 짧고 강렬한 명제, 리스트 형태일 때.
             4. **TYPE: BOX** -> 배경 설명, 서술형 문장, 긴 호흡의 글일 때.
-            5. **TYPE: COVER** (1페이지 고정), **TYPE: OUTRO** (8페이지 고정)
+            5. **TYPE: COVER** (1페이지), **TYPE: OUTRO** (8페이지)
             
             [필수 규칙]
             1. SLIDE 1 (COVER): HEAD는 15자 이내 훅, DESC는 40자 이내 요약.
             2. SLIDE 2~7: 각 장의 DESC(본문)는 **80자 이상 충실하게 작성**. 빈칸 금지.
-            3. 다양한 TYPE을 섞어서 지루하지 않게 구성할 것.
+            3. 다양한 TYPE을 섞어서 구성할 것.
             4. 해시태그 5개 추천.
             
             [출력형식]
@@ -292,7 +286,6 @@ if run_button:
             TYPE: (QUOTE/DATA/BAR/BOX 중 택1)
             HEAD: ...
             DESC: ...
-            ...
             """
             
             response = model.generate_content(prompt)
@@ -326,11 +319,11 @@ if run_button:
                     elif mode == "HEAD" and curr: curr["HEAD"] += " " + line
             if curr: slides.append(curr)
             
-            if not slides: st.error("AI 생성 실패. 다시 시도해주세요."); st.stop()
+            if not slides: st.error("AI 생성 실패."); st.stop()
             
             if len(slides) >= 8: slides[7] = {"TYPE": "OUTRO", "HEAD":"", "DESC":""}
             while len(slides) < 8:
-                 slides.append({"TYPE": "OUTRO" if len(slides)==7 else "BOX", "HEAD":"제목 없음", "DESC":"내용 없음"})
+                 slides.append({"TYPE": "OUTRO" if len(slides)==7 else "BOX", "HEAD":"", "DESC":""})
 
         except Exception as e: st.error(f"AI 오류: {e}"); st.stop()
 
@@ -348,6 +341,7 @@ if run_button:
             f_serif = safe_font(font_paths['serif'], 90)
             f_huge = safe_font(font_paths['title'], 200)
             f_badge = safe_font(font_paths['body'], 30)
+            f_quote = safe_font(font_paths['serif'], 250) # 따옴표용 대형 폰트
             
             img_sym = load_local_image(LOGO_SYMBOL_PATH, 60)
             img_txt = load_local_image(LOGO_TEXT_PATH, 160)
@@ -371,8 +365,7 @@ if run_button:
             tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
             
             for i, slide in enumerate(slides):
-                # AI가 정해준 타입을 쓰되 대문자로 통일
-                sType = slide.get('TYPE', 'BOX').upper() 
+                sType = slide.get('TYPE', 'BOX').upper()
                 
                 # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
@@ -388,7 +381,7 @@ if run_button:
 
                 draw = ImageDraw.Draw(img, 'RGBA')
                 
-                # 상단 로고 & 뱃지
+                # 로고
                 top_y = 100 if is_story else 60
                 if sType != 'OUTRO':
                     next_x = 60
@@ -404,7 +397,7 @@ if run_button:
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
-                # 내용 그리기 (AI가 고른 sType에 따라 분기)
+                # 내용 그리기
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
                 
@@ -422,7 +415,7 @@ if run_button:
                         draw_text_with_stroke(draw, (60, curr_y), l, f_title, stroke_width=3)
                         curr_y += 110
 
-                elif sType == 'DATA': # 데이터형 (빅 넘버)
+                elif sType == 'DATA':
                     bbox = draw.textbbox((0,0), head, font=f_huge)
                     w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
                     draw_text_with_stroke(draw, ((CANVAS_W-w)//2, (CANVAS_H-h)//2 - 100), head, f_huge, fill=color_main, stroke_width=4)
@@ -433,9 +426,11 @@ if run_button:
                         draw_text_with_stroke(draw, ((CANVAS_W-lw)//2, curr_y), l, f_body, stroke_width=2)
                         curr_y += 60
 
-                elif sType == 'QUOTE': # 인용형
+                elif sType == 'QUOTE':
                     start_y = 250 if not is_story else 350
-                    draw.text((80, start_y - 120), "“", font=f_serif, fill=(255,255,255,70), font_size=250)
+                    # [수정] 폰트 객체 직접 전달 (fill 중복 오류 해결)
+                    draw.text((80, start_y - 120), "“", font=f_quote, fill=(255,255,255,70))
+                    
                     h_lines = wrap_text(head, f_title, CANVAS_W-150, draw)
                     for l in h_lines:
                         draw_text_with_stroke(draw, (150, start_y), l, f_title, stroke_width=3)
@@ -447,7 +442,7 @@ if run_button:
                         draw_text_with_stroke(draw, (150, start_y), l, f_body, fill="#cccccc", stroke_width=2)
                         start_y += 65
 
-                elif sType == 'BAR': # 바형
+                elif sType == 'BAR':
                     start_y = 250 if not is_story else 350
                     h_lines = wrap_text(head, f_title, CANVAS_W-150, draw)
                     d_lines = wrap_text(desc, f_body, CANVAS_W-150, draw)
@@ -462,29 +457,29 @@ if run_button:
                         draw_text_with_stroke(draw, (120, start_y), l, f_body, fill="#dddddd", stroke_width=2)
                         start_y += 65
 
-                elif sType == 'OUTRO': # 아웃트로
+                elif sType == 'OUTRO':
                     out_c = "white" if is_color_dark(color_main) else "black"
                     slogan = "First in, Last out"
                     w = draw.textlength(slogan, font=f_serif)
-                    draw.text(((CANVAS_W-w)/2, CANVAS_H//3), slogan, f_serif, fill=out_c)
+                    # [수정] 폰트 인자 명시 (오류 해결)
+                    draw.text(((CANVAS_W-w)/2, CANVAS_H//3), slogan, font=f_serif, fill=out_c)
                     brand = "세상을 보는 눈, 세계일보"
                     w2 = draw.textlength(brand, font=f_body)
-                    draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, f_body, fill=out_c)
+                    draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=f_body, fill=out_c)
                     qr = generate_qr_code(url).resize((250, 250))
                     qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
                     draw.rounded_rectangle((qx, qy, qx+250, qy+250), 20, "white")
                     img.paste(qr, (qx+10, qy+10))
                     msg = "기사 원문 보러가기"
                     w3 = draw.textlength(msg, font=f_small)
-                    draw.text(((CANVAS_W-w3)/2, qy + 270), msg, f_small, fill=out_c)
+                    draw.text(((CANVAS_W-w3)/2, qy + 270), msg, font=f_small, fill=out_c)
 
-                else: # Fallback: BOX형
+                else: # BOX (기본)
                     start_y = 250 if not is_story else 350
                     h_lines = wrap_text(head, f_title, CANVAS_W-150, draw)
                     d_lines = wrap_text(desc, f_body, CANVAS_W-150, draw)
                     
                     box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
-                    # 중앙 정렬하되 상단 침범 시 조정
                     box_start_y = max(start_y, (CANVAS_H - box_h) // 2)
                     draw_rounded_box(draw, (80, box_start_y, CANVAS_W-80, box_start_y + box_h), 30, (0,0,0,160))
                     txt_y = box_start_y + 50
