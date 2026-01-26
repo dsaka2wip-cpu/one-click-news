@@ -14,7 +14,7 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v13.5", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v13.6", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -151,23 +151,22 @@ def create_smooth_gradient(w, h):
 def draw_text_with_stroke(draw, pos, text, font, fill="white", stroke_fill="black", stroke_width=2):
     draw.text(pos, text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
+# [수정] 뱃지 위치 정교화 및 디자인 개선
 def draw_pill_badge(draw, x, y, text, font, bg_color="#C80000"):
-    padding_x, padding_y = 18, 8
+    padding_x, padding_y = 15, 6
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
     
-    # 캡슐 모양 (높이의 절반을 반지름으로)
     h = text_h + padding_y * 2
-    r = h // 2 
     w = text_w + padding_x * 2
     
-    # 왼쪽, 오른쪽 원 + 중간 사각형
+    # 알약 모양
     draw.ellipse((x, y, x+h, y+h), fill=bg_color) 
     draw.ellipse((x+w-h, y, x+w, y+h), fill=bg_color)
-    draw.rectangle((x+r, y, x+w-r, y+h), fill=bg_color)
+    draw.rectangle((x+h//2, y, x+w-h//2, y+h), fill=bg_color)
     
-    # 텍스트 (시각적 중앙 보정)
+    # 텍스트 중앙 보정
     draw.text((x + padding_x, y + padding_y - 2), text, font=font, fill="white")
 
 def wrap_text(text, font, max_width, draw):
@@ -189,14 +188,9 @@ def generate_qr_code(link):
     qr = qrcode.QRCode(box_size=10, border=1)
     qr.add_data(link)
     qr.make(fit=True)
-    return qr.make_image(fill_color="black", back_color="white")
+    return qr.make_image(fill_color="black", back_color="white").convert("RGBA")
 
-def is_color_dark(hex):
-    hex = hex.lstrip('#')
-    rgb = tuple(int(hex[i:i+2], 16) for i in (0,2,4))
-    return (0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]) < 128
-
-# [수정] 로고 높이를 반환하여 뱃지 위치 계산에 사용
+# 로고 배치 및 뱃지 기준점 반환
 def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     check_area = (x, y, x+300, y+100)
     brightness = check_brightness(bg_img, check_area)
@@ -213,6 +207,7 @@ def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     
     if logotxt:
         txt_to_paste = recolor_image_to_white(logotxt) if use_white else logotxt
+        # 텍스트 로고 수직 중앙 정렬
         target_y = y + (symbol.height - logotxt.height) // 2 if symbol else y
         bg_img.paste(txt_to_paste, (next_x, target_y), txt_to_paste)
         next_x += logotxt.width
@@ -226,16 +221,45 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [4] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v13.5 Pixel Perfect)")
+st.title("📰 One-Click News (v13.6 Ultimate Integrity)")
 
+# 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
+
+# 2. 실행 버튼
 run_button = st.button("🚀 카드뉴스 제작")
+
+# 3. 결과 컨테이너 (여기에 카드가 뜸)
 result_container = st.container()
 
+# 4. [필독] 상세 안내문 (항상 펼침, 전체 히스토리 포함)
 st.markdown("---")
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Full Spec)", expanded=True):
+with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성기: 기술 명세 및 가이드 (Full Ver.)", expanded=True):
     st.markdown("""
-    (생략: 이전과 동일)
+    ### 📌 프로젝트 개요
+    이 도구는 단순한 텍스트 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI(Gemini Pro)** 기술을 결합하여, 기사의 맥락을 완벽하게 이해하고 시각화하는 **'지능형 콘텐츠 파트너'**입니다.
+
+    ---
+
+    ### 🧠 1. Intelligence (맥락 인식 및 기획)
+    * **내러티브 구조화 (Narrative Arc):** 기계적인 요약을 거부합니다. 기사를 **'Hook(도입) - Content(전개) - Conclusion(결론)'**의 8단 서사 구조로 재구성하여 독자의 몰입을 유도합니다.
+    * **맥락 기반 레이아웃 결정 (Context-Aware Design):** AI가 문단의 성격을 스스로 분석합니다.
+        * **인용(Quote):** 인터뷰나 핵심 발언이 나오면 따옴표 디자인 적용.
+        * **데이터(Data):** 숫자나 통계가 핵심이면 인포그래픽(Big Number) 디자인 적용.
+        * **요약(Bar) / 서술(Box):** 내용의 호흡에 따라 최적의 레이아웃을 자동 선택합니다.
+    * **태그 자동 감지 (Smart Tagging):** 기사 제목의 `[단독]`, `[심층기획]` 등을 자동으로 인식하여, 로고 옆에 **전용 뱃지**를 부착합니다.
+
+    ### 🎨 2. Design Engine (미학적 완성도)
+    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 밝기를 자동으로 낮추고 텍스트에 **Deep Shadow & Stroke** 기술을 적용했습니다.
+    * **카멜레온 로고 (Adaptive Logo):** 배경이 어두우면 로고를 흰색으로, 밝으면 검은색으로 자동 변환하여 시인성을 확보합니다.
+    * **안전형 레이아웃 (Safe Layout):** 텍스트가 카드 밖으로 잘리지 않도록 **Top-Down** 방식의 배치 로직과 넉넉한 여백(Padding)을 적용했습니다.
+    * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 규격을 자유롭게 오갈 수 있습니다.
+
+    ### 🛡️ 3. Core Tech (안정성 및 편의성)
+    * **자동 자산 로드:** 로고와 전용 폰트를 서버에 내장하여, 매번 파일을 업로드하는 불편함을 없앴습니다.
+    * **멀티 이미지 스크래핑:** 기사 썸네일뿐만 아니라 본문의 모든 이미지를 수집하여, 슬라이드마다 다채로운 배경을 제공합니다.
+    * **Visual SEO:** 인스타그램 유입을 극대화하기 위해 기사 내용에 최적화된 **해시태그**를 자동 생성합니다.
+    * **타이포그래피 자동 교정:** `3 . 1절`과 같은 어색한 띄어쓰기를 정규표현식 엔진이 자동으로 교정합니다.
     """)
 
 # ==============================================================================
@@ -274,19 +298,26 @@ if run_button:
             model = genai.GenerativeModel(model_name)
             
             prompt = f"""
-            당신은 세계일보 전문 에디터입니다. 기사를 읽고 SNS용 카드뉴스 8장을 기획하세요.
+            당신은 세계일보 전문 에디터이자 아트 디렉터입니다. 기사를 SNS용 카드뉴스 8장으로 기획하세요.
             [제목] {title}
             [내용] {text[:4000]}
             
+            [레이아웃 결정 규칙]
+            1. **TYPE: QUOTE** (인용/발언)
+            2. **TYPE: DATA** (숫자/통계)
+            3. **TYPE: BAR** (요약/명제)
+            4. **TYPE: BOX** (일반 서술)
+            
             [필수 규칙]
             1. **SLIDE 1 (COVER):** HEAD는 15자 이내 훅, DESC는 40자 이내.
-            2. **SLIDE 2~7 (CONTENT):** 각 장의 DESC(본문)는 80자 이상 100자 이하로 작성. (박스 안넘치게)
-            3. 기사에 숫자가 핵심이라면 TYPE을 'DATA'로 지정.
-            4. 마지막에 해시태그 5개 추천.
+            2. **SLIDE 2~7 (CONTENT):** 각 장의 DESC(본문)는 **80자 내외로 작성**. (절대 길게 쓰지 말 것, 박스 넘침 방지)
+            3. **SLIDE 8 (OUTRO):** 고정.
+            4. 해시태그 5개 추천.
             
             [출력형식]
             COLOR_MAIN: #Hex
             HASHTAGS: #태그
+            
             [SLIDE 1]
             TYPE: COVER
             HEAD: ...
@@ -329,7 +360,7 @@ if run_button:
             
             if len(slides) >= 8: slides[7] = {"TYPE": "OUTRO", "HEAD":"", "DESC":""}
             while len(slides) < 8:
-                 slides.append({"TYPE": "OUTRO" if len(slides)==7 else "BOX", "HEAD":"", "DESC":""})
+                 slides.append({"TYPE": "OUTRO" if len(slides)==7 else "BOX", "HEAD":"제목 없음", "DESC":"내용 없음"})
 
         except Exception as e: st.error(f"AI 오류: {e}"); st.stop()
 
@@ -387,37 +418,30 @@ if run_button:
 
                 draw = ImageDraw.Draw(img, 'RGBA')
                 
-                # 상단 로고 & 뱃지 (수직 정렬 로직 적용)
+                # 상단 로고 & 뱃지
                 top_y = 100 if is_story else 60
                 if sType != 'OUTRO':
                     next_x = 60
-                    # 로고 높이 정보 받아오기
-                    logo_h = 0
+                    logo_height = 40 # 기본값
+                    
                     if img_sym or img_txt:
-                        next_x, logo_h = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
-                        next_x += 25 
+                        next_x, logo_height = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
+                        next_x += 25
                     else:
                         draw.text((60, top_y), "SEGYE BRIEFING", font=f_small, fill=color_main)
                         next_x = 320
-                        logo_h = 40 # 대략적 텍스트 높이
 
-                    # 뱃지 수직 중앙 정렬
                     if news_tag:
-                        # 뱃지 높이 예측 (폰트 35 + 패딩 16 = 약 51px)
-                        badge_h = 51
-                        # 로고 중앙선 = top_y + (logo_h / 2)
-                        # 뱃지 시작점 = 중앙선 - (badge_h / 2)
-                        badge_y = top_y + (logo_h // 2) - (badge_h // 2)
+                        # 뱃지 높이(약 50px)를 고려하여 로고 중앙에 맞춤
+                        badge_y = top_y + (logo_height // 2) - 25 
                         draw_pill_badge(draw, next_x, badge_y, news_tag, f_badge, bg_color="#C80000")
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
-                # 내용 그리기 ([수정] 좌우 여백 100px로 확대)
+                # 내용 그리기 (여백 120px 확보)
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
-                
-                # 여백 설정 (전체폭 - 좌우여백합 / 1080 - 200 = 880)
-                content_width = CANVAS_W - 200 
+                content_width = CANVAS_W - 240 # 좌우 120씩 여백
                 
                 if sType == 'COVER':
                     d_lines = wrap_text(desc, f_body, content_width, draw)
@@ -446,7 +470,6 @@ if run_button:
 
                 elif sType == 'QUOTE':
                     start_y = 250 if not is_story else 350
-                    # 따옴표: font=f_quote 명시 (오류 해결)
                     draw.text((80, start_y - 120), "“", font=f_quote, fill=(255,255,255,70))
                     h_lines = wrap_text(head, f_title, content_width, draw)
                     for l in h_lines:
@@ -456,7 +479,7 @@ if run_button:
                     start_y += 60
                     d_lines = wrap_text(desc, f_body, content_width, draw)
                     for l in d_lines:
-                        draw_text_with_stroke(draw, (150, start_y), l, f_body, fill="#cccccc", stroke_width=2)
+                        draw_text_with_stroke(draw, (150, start_y), l, f_body, stroke_width=2)
                         start_y += 65
 
                 elif sType == 'BAR':
@@ -471,25 +494,21 @@ if run_button:
                         start_y += 110
                     start_y += 30
                     for l in d_lines:
-                        draw_text_with_stroke(draw, (120, start_y), l, f_body, fill="#dddddd", stroke_width=2)
+                        draw_text_with_stroke(draw, (120, start_y), l, f_body, stroke_width=2)
                         start_y += 65
 
                 elif sType == 'OUTRO':
                     out_c = "white" if is_color_dark(color_main) else "black"
                     slogan = "First in, Last out"
                     w = draw.textlength(slogan, font=f_serif)
-                    # 명시적 인자 전달
                     draw.text(((CANVAS_W-w)/2, CANVAS_H//3), slogan, font=f_serif, fill=out_c)
                     brand = "세상을 보는 눈, 세계일보"
                     w2 = draw.textlength(brand, font=f_body)
                     draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=f_body, fill=out_c)
-                    
-                    # [수정] QR 코드 안전하게 붙이기
-                    qr = generate_qr_code(url).resize((250, 250)).convert("RGBA") # RGBA로 변환
+                    qr = generate_qr_code(url).resize((250, 250))
                     qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
                     draw.rounded_rectangle((qx, qy, qx+250, qy+250), 20, "white")
-                    img.paste(qr, (qx+10, qy+10), qr) # 마스크 사용
-                    
+                    img.paste(qr, (qx+10, qy+10), qr) # Mask 사용
                     msg = "기사 원문 보러가기"
                     w3 = draw.textlength(msg, font=f_small)
                     draw.text(((CANVAS_W-w3)/2, qy + 270), msg, font=f_small, fill=out_c)
