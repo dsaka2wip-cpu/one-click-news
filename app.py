@@ -14,9 +14,9 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v9.6", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v9.6 Stable)")
-st.markdown("### 💎 모델 안정화(1.5 Flash) & 안전 필터 해제")
+st.set_page_config(page_title="One-Click News v9.7", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v9.7 Final Stable)")
+st.markdown("### 💎 모델 자동 우회(Fallback) 기능 탑재")
 
 # --- 설정: 파일명 ---
 ASSET_FILENAMES = {
@@ -193,12 +193,9 @@ if st.button("🚀 카드뉴스 제작"):
     title, text, img_url = advanced_scrape(url)
     if len(text) < 50: st.error("본문 추출 실패"); st.stop()
 
-    # --- AI 프롬프트 (안전장치 추가) ---
+    # --- AI 프롬프트 (자동 우회 로직 추가) ---
     try:
-        # [변경] 모델을 안정적인 1.5-flash로 변경
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # [변경] 안전 설정 해제 (정치 기사 허용)
+        # 안전 설정 (정치 허용)
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -206,7 +203,7 @@ if st.button("🚀 카드뉴스 제작"):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        prompt = f"""
+        prompt_text = f"""
         당신은 세계일보의 '디지털 스토리텔링 에디터'입니다.
         [기사] 제목: {title} / 내용: {text[:6000]}
         [규칙]
@@ -226,9 +223,24 @@ if st.button("🚀 카드뉴스 제작"):
         HEAD: First in, Last out
         DESC: 세상을 보는 눈, 세계일보
         """
-        
-        response = model.generate_content(prompt, safety_settings=safety_settings)
-        res_text = response.text
+
+        # [핵심] 모델 우회 로직 (Try Flash -> Fail -> Try Pro)
+        res_text = ""
+        try:
+            # 1순위: 최신 모델
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt_text, safety_settings=safety_settings)
+            res_text = response.text
+        except Exception as e1:
+            st.warning(f"⚠️ 최신 모델 연결 실패 ({e1}). 안정 모델(Pro)로 전환합니다...")
+            try:
+                # 2순위: 구형 안정 모델 (Gemini Pro)
+                model = genai.GenerativeModel('gemini-pro')
+                response = model.generate_content(prompt_text, safety_settings=safety_settings)
+                res_text = response.text
+            except Exception as e2:
+                st.error(f"❌ 모든 모델 생성 실패: {e2}")
+                st.stop()
         
         slides = []
         curr = {}
@@ -257,12 +269,11 @@ if st.button("🚀 카드뉴스 제작"):
         if curr: slides.append(curr)
         
         if not slides:
-            st.error("AI 응답을 파싱하지 못했습니다. 다시 시도해주세요.")
+            st.error("AI 응답을 파싱하지 못했습니다. (모델이 엉뚱한 답을 함)")
             st.stop()
             
     except Exception as e:
-        # [변경] 에러 메시지를 상세하게 출력
-        st.error(f"기획 실패 원인: {e}")
+        st.error(f"시스템 에러: {e}")
         st.stop()
 
     # --- 자산 로드 ---
@@ -424,4 +435,4 @@ if st.button("🚀 카드뉴스 제작"):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             zf.writestr(f"card_{i+1:02d}.png", img_byte_arr.getvalue())
-    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_stable.zip", "application/zip", use_container_width=True)
+    st.download_button("💾 전체 다운로드 (.zip)", zip_buffer.getvalue(), "segye_news_complete.zip", "application/zip", use_container_width=True)
