@@ -9,9 +9,9 @@ import re
 import random
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v3.3", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v3.3 Flexible Flow)")
-st.markdown("### 🌊 4~8장 자동 호흡 조절 & 원 소스(One-Source) 배경 디자인")
+st.set_page_config(page_title="One-Click News v3.4", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v3.4 Tab View)")
+st.markdown("### 🌊 4~8장 자동 생성 + 탭(Tab) 뷰어 (안정성 강화)")
 
 # --- 폰트 준비 ---
 @st.cache_resource
@@ -190,13 +190,15 @@ if st.button("🚀 카드뉴스 제작 시작"):
         base_img = Image.new('RGB', (1080, 1080), color='#1a1a2e')
         bg_final = base_img
 
-    # --- 렌더링 루프 ---
+    # --- 렌더링 루프 (탭 뷰 방식 적용) ---
     fonts = get_fonts()
     if not fonts: st.error("폰트 로딩 실패"); st.stop()
     
     st.markdown(f"### 📸 총 {len(slides)}장의 카드뉴스가 생성되었습니다.")
-    # [중요] 여러 장을 보여주기 위해 columns 사용
-    cols = st.columns(len(slides))
+    
+    # [핵심 변경] st.columns -> st.tabs (안정성 확보)
+    tab_names = [f"{i+1}면" for i in range(len(slides))]
+    tabs = st.tabs(tab_names)
     
     for i, slide in enumerate(slides):
         img = bg_final.copy()
@@ -206,4 +208,44 @@ if st.button("🚀 카드뉴스 제작 시작"):
         font_cover_sub = ImageFont.truetype(BytesIO(fonts['body']), 50)
         font_content = ImageFont.truetype(BytesIO(fonts['body']), 65) 
         font_outro_slogan = ImageFont.truetype(BytesIO(fonts['serif']), 80)
-        font_outro_brand = Image
+        font_outro_brand = ImageFont.truetype(BytesIO(fonts['body']), 40)
+        
+        if slide.get("TYPE") == "COVER":
+            draw.text((60, 80), "SEGYE BRIEFING", font=font_outro_brand, fill=color_main)
+            title_text = slide.get("TEXT", "")
+            lines = wrap_text(title_text, font_cover_title, 960, draw)
+            start_y = 350
+            for line in lines:
+                draw.text((60, start_y), line, font=font_cover_title, fill="white")
+                start_y += 110
+            draw.line((60, start_y+20, 260, start_y+20), fill=color_main, width=12)
+            if slide.get("SUB"):
+                draw.text((60, start_y+80), slide["SUB"], font=font_cover_sub, fill="#cccccc")
+
+        elif slide.get("TYPE") == "CONTENT":
+            draw.text((950, 60), f"{i+1}", font=font_cover_sub, fill="#888888")
+            body_text = clean_text_strict(slide.get("TEXT", ""))
+            lines = wrap_text(body_text, font_content, 900, draw)
+            total_height = len(lines) * 90
+            start_y = (1080 - total_height) / 2 
+            for line in lines:
+                draw.text((90, start_y), line, font=font_content, fill="white")
+                start_y += 90
+            bar_y_start = (1080 - total_height) / 2
+            draw.line((50, bar_y_start, 50, bar_y_start + total_height), fill=color_main, width=10)
+
+        elif slide.get("TYPE") == "OUTRO":
+            slogan = "First in, Last out"
+            bbox = draw.textbbox((0, 0), slogan, font=font_outro_slogan)
+            w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((1080-w)/2, 450), slogan, font=font_outro_slogan, fill=color_main)
+            brand = "세상을 보는 눈, 세계일보"
+            bbox2 = draw.textbbox((0, 0), brand, font=font_outro_brand)
+            w2 = bbox2[2] - bbox2[0]
+            draw.text(((1080-w2)/2, 580), brand, font=font_outro_brand, fill="white")
+            draw.line((440, 420, 640, 420), fill="white", width=3)
+            draw.line((440, 650, 640, 650), fill="white", width=3)
+
+        # 탭 안에 이미지 출력
+        with tabs[i]:
+            st.image(img, caption=f"Page {i+1}")
