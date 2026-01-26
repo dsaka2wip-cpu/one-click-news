@@ -14,9 +14,9 @@ import fitz  # PyMuPDF
 import re
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v10.5", page_icon="📰", layout="wide")
-st.title("📰 One-Click News (v10.5 Design Polish)")
-st.markdown("### 💎 레이아웃 변주 복구 & 타이포그래피 개선")
+st.set_page_config(page_title="One-Click News v10.6", page_icon="📰", layout="wide")
+st.title("📰 One-Click News (v10.6 Layout & Font Fix)")
+st.markdown("### 💎 폰트 깨짐 해결 & 띄어쓰기 자동 교정")
 
 # --- [설정] 자산 파일명 ---
 ASSET_FILENAMES = {
@@ -27,16 +27,16 @@ ASSET_FILENAMES = {
     "font_serif": "Serif.ttf"
 }
 
-# --- 리소스 캐싱 (폰트 변경) ---
+# --- 리소스 캐싱 (안전한 나눔폰트로 복구) ---
 @st.cache_resource
 def get_web_resources():
     resources = {}
     try:
-        # [변경] 제목용: Noto Sans KR Black (숫자 간격 문제 해결)
-        resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Black.ttf", timeout=10).content
-        # 본문용: Noto Sans KR Bold
-        resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Bold.ttf", timeout=10).content
-        # 명조용: Noto Serif KR
+        # [제목용] 나눔고딕 엑스트라 볼드 (꽉 찬 느낌)
+        resources['title'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-ExtraBold.ttf", timeout=10).content
+        # [본문용] 나눔고딕 볼드
+        resources['body'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf", timeout=10).content
+        # [명조용] 나눔명조 엑스트라 볼드
         resources['serif'] = requests.get("https://github.com/google/fonts/raw/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf", timeout=10).content
     except: return None
     return resources
@@ -74,10 +74,17 @@ def get_available_model():
     except: return "models/gemini-pro"
 
 # --- 디자인 유틸리티 ---
-def clean_text(text):
-    """텍스트 내 불필요한 공백 제거 (3 . 1절 -> 3.1절)"""
-    text = re.sub(r'\s+', ' ', text).strip() # 다중 공백 제거
-    text = text.replace(" . ", ".").replace(" , ", ",") # 특수문자 주변 공백 정리
+def clean_text_spacing(text):
+    """
+    3 . 1절 -> 3.1절
+    기자 . -> 기자.
+    특수문자 앞뒤의 불필요한 공백을 제거하여 폰트 렌더링 이상을 방지
+    """
+    if not text: return ""
+    # 점(.) 앞뒤 공백 제거
+    text = re.sub(r'\s*\.\s*', '.', text)
+    # 쉼표(,) 앞 공백 제거
+    text = re.sub(r'\s*\,', ',', text)
     return text
 
 def validate_hex_color(color_str):
@@ -90,8 +97,18 @@ def validate_hex_color(color_str):
         return "#FFD700"
     except: return "#FFD700"
 
+def add_noise_texture(img, intensity=0.05):
+    if img.mode != 'RGBA': img = img.convert('RGBA')
+    width, height = img.size
+    noise = np.random.randint(0, 255, (height, width, 4), dtype=np.uint8)
+    noise[:, :, 3] = int(255 * intensity)
+    return Image.alpha_composite(img, Image.fromarray(noise, 'RGBA'))
+
 def draw_rounded_box(draw, xy, radius, fill):
     draw.rounded_rectangle(xy, radius=radius, fill=fill)
+
+def create_glass_box(draw, xy, radius, fill=(0,0,0,160)):
+    draw_rounded_box(draw, xy, radius, fill)
 
 def create_smooth_gradient(width, height):
     overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -112,7 +129,8 @@ def draw_text_with_shadow(draw, position, text, font, fill="white", shadow_color
 
 def wrap_text(text, font, max_width, draw):
     lines = []
-    text = clean_text(text)
+    # [수정] 텍스트 줄바꿈 전 정제
+    text = clean_text_spacing(text)
     for paragraph in text.split('\n'):
         if not paragraph.strip(): continue
         words = paragraph.split(' ')
@@ -192,7 +210,7 @@ with st.sidebar:
 # --- 메인 ---
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 
-if st.button("🚀 카드뉴스 제작 (v10.5)"):
+if st.button("🚀 카드뉴스 제작 (v10.6)"):
     if not api_key: st.error("API Key를 입력해주세요."); st.stop()
     if not url: st.error("URL을 입력해주세요."); st.stop()
     
@@ -284,7 +302,6 @@ if st.button("🚀 카드뉴스 제작 (v10.5)"):
             try: return ImageFont.truetype(io.BytesIO(font_bytes), size)
             except: return ImageFont.load_default()
 
-        # [폰트 적용]
         font_title = safe_font(load_asset_bytes(up_font_title, ASSET_FILENAMES['font_title'], web_fonts['title']), 95)
         font_body = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 48)
         font_small = safe_font(load_asset_bytes(up_font_body, ASSET_FILENAMES['font_body'], web_fonts['body']), 30)
@@ -315,6 +332,10 @@ if st.button("🚀 카드뉴스 제작 (v10.5)"):
         tabs = st.tabs([f"{i+1}면" for i in range(len(slides))])
         title_color = "#FFFFFF" if is_color_dark(color_main) else color_main
         
+        # [레이아웃 패턴 미리 섞기]
+        layout_pattern = ['BOX', 'BAR', 'QUOTE']
+        random.shuffle(layout_pattern)
+        
         for i, slide in enumerate(slides):
             sType = slide.get('TYPE', 'CONTENT')
             if sType == 'COVER': img = bg_cover.copy()
@@ -333,8 +354,8 @@ if st.button("🚀 카드뉴스 제작 (v10.5)"):
 
             # [1] COVER
             if sType == 'COVER':
-                head = slide.get('HEAD', '')
-                desc = slide.get('DESC', '')
+                head = clean_text_spacing(slide.get('HEAD', ''))
+                desc = clean_text_spacing(slide.get('DESC', ''))
                 d_lines = wrap_text(desc, font_body, 980, draw)
                 current_y = 1080 - 120 - (len(d_lines) * 60)
                 for line in d_lines:
@@ -348,17 +369,18 @@ if st.button("🚀 카드뉴스 제작 (v10.5)"):
                     draw_text_with_shadow(draw, (60, current_y), line, font_title, fill="white", offset=(4,4))
                     current_y += 110
 
-            # [2] CONTENT (레이아웃 3종 랜덤 적용)
+            # [2] CONTENT (레이아웃 변주 강제 적용)
             elif sType == 'CONTENT':
-                # [복구] 랜덤 레이아웃 엔진
-                layout = random.choice(['BOX', 'BAR', 'QUOTE'])
-                head = slide.get('HEAD', '')
-                desc = slide.get('DESC', '')
+                # 순서대로 패턴 적용 (단조로움 방지)
+                layout = layout_pattern[i % 3]
+                
+                head = clean_text_spacing(slide.get('HEAD', ''))
+                desc = clean_text_spacing(slide.get('DESC', ''))
                 
                 h_lines = wrap_text(head, font_title, 900, draw)
                 d_lines = wrap_text(desc, font_body, 900, draw)
                 
-                if layout == 'BOX': # 박스형 (기존)
+                if layout == 'BOX': 
                     box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
                     start_y = (1080 - box_h) // 2
                     draw_rounded_box(draw, (80, start_y, 1000, start_y + box_h), 30, (0,0,0,160))
@@ -372,7 +394,7 @@ if st.button("🚀 카드뉴스 제작 (v10.5)"):
                         draw.text((120, txt_y), line, font=font_body, fill="white")
                         txt_y += 65
                         
-                elif layout == 'BAR': # 좌측 바형
+                elif layout == 'BAR': 
                     start_y = (1080 - ((len(h_lines)*110) + (len(d_lines)*65) + 60)) // 2
                     draw.rectangle([(80, start_y), (95, start_y + (len(h_lines)*110) + (len(d_lines)*65) + 60)], fill=color_main)
                     txt_y = start_y
@@ -384,9 +406,8 @@ if st.button("🚀 카드뉴스 제작 (v10.5)"):
                         draw_text_with_shadow(draw, (120, txt_y), line, font_body, fill="#dddddd")
                         txt_y += 65
                         
-                elif layout == 'QUOTE': # 따옴표형
+                elif layout == 'QUOTE': 
                     start_y = 350
-                    # 거대 따옴표
                     draw.text((80, start_y - 150), "“", font=font_serif, fill=(255,255,255,50), font_size=300) 
                     for line in h_lines:
                         draw_text_with_shadow(draw, (150, start_y), line, font_title)
