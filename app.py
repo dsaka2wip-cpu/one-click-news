@@ -14,7 +14,7 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v14.9", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v15.0", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
@@ -66,7 +66,6 @@ def clean_text_spacing(text):
     # 마침표/쉼표 뒤 띄어쓰기
     text = re.sub(r'(?<=[가-힣])\.(?=[가-힣a-zA-Z])', '. ', text)
     text = re.sub(r'(?<=[가-힣])\,(?=[가-힣a-zA-Z])', ', ', text)
-    # 다중 공백 -> 단일 공백 (중요)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
@@ -222,7 +221,7 @@ def wrap_text(text, font, max_width, draw=None):
         lines.append(current_line)
     return lines
 
-# [FIX] 문맥 인식(Semantic) 줄바꿈 업그레이드
+# [FIX] 문맥 인식(Semantic) 줄바꿈 업그레이드 (균형 우선)
 def wrap_title_semantic(text, font, max_width):
     text = clean_text_spacing(text)
     try: length = font.getlength(text)
@@ -232,14 +231,13 @@ def wrap_title_semantic(text, font, max_width):
     words = text.split()
     if len(words) == 1: return [text]
     
-    # 1. 붙어있어야 하는 '부정 부사' 등 (Sticky)
+    # 1. 붙어있어야 하는 '부정 부사' 등
     sticky = ['안', '못', '더', '잘', '맨', '매일', '가장', '꼭', '좀', '막']
     
-    # 2. 끊기 좋은 '조사'와 '어미' (Split Triggers)
-    # 흐르며(며), 하고(고), 하니(니) 등 연결 어미 추가
-    split_suffixes = ['은', '는', '이', '가', '을', '를', '에', '와', '과', '로', '도', '만', '서', '고', '며', '니', '면']
+    # 2. 끊기 좋은 '조사'와 '어미'
+    split_suffixes = ['은', '는', '이', '가', '을', '를', '에', '의', '와', '과', '로', '도', '만', '서', '고', '며', '니', '면']
     
-    # 3. 문장 부호 (Absolute Split)
+    # 3. 문장 부호
     punctuations = [',', '?', '!', ':', ';']
     
     best_split = -1
@@ -259,23 +257,24 @@ def wrap_title_semantic(text, font, max_width):
         score = 0
         prev_word = words[i-1]
         
-        # [Rule 1] 문장부호 뒤는 강력한 끊기 포인트 (+100)
-        if any(prev_word.endswith(p) for p in punctuations):
-            score += 100
+        # [Rule 1] 문장부호 뒤 (+100)
+        if any(prev_word.endswith(p) for p in punctuations): score += 100
             
-        # [Rule 2] 연결 어미/조사 뒤는 좋은 포인트 (+40)
-        # 단, 접착 단어(sticky)가 아니어야 함
+        # [Rule 2] 연결 어미/조사 뒤 (+30)
         if prev_word not in sticky:
-            if any(prev_word.endswith(s) for s in split_suffixes):
-                score += 40
+            if any(prev_word.endswith(s) for s in split_suffixes): score += 30
         
-        # [Rule 3] 부정 부사 뒤는 절대 끊지 말 것 (-200)
-        if prev_word in sticky:
-            score -= 200
+        # [Rule 3] 부정 부사 뒤 끊기 금지 (-200)
+        if prev_word in sticky: score -= 200
             
-        # [Rule 4] 균형감 (너무 한쪽으로 쏠리지 않게)
+        # [Rule 4] 길이 균형 (Balance is King) -> 가중치 대폭 상향 (+60)
+        # 두 줄의 길이가 비슷할수록 높은 점수
         balance = min(w1, w2) / max(w1, w2)
-        score += balance * 20
+        score += balance * 60
+        
+        # [Rule 5] 앞줄이 너무 짧으면 패널티 (-50)
+        # 예: "시간이" (3자) 처럼 너무 짧게 남는 것 방지
+        if len(L1) <= 3: score -= 50
         
         if score > best_score:
             best_score = score
@@ -308,13 +307,11 @@ def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     use_white = brightness < 100
     
     next_x = x
-    logo_height = 0
     
     if symbol:
         sym_to_paste = recolor_image_to_white(symbol) if use_white else symbol
         bg_img.paste(sym_to_paste, (x, y), sym_to_paste)
         next_x += symbol.width + 15
-        logo_height = max(logo_height, symbol.height)
     
     if logotxt:
         txt_to_paste = recolor_image_to_white(logotxt) if use_white else logotxt
@@ -322,9 +319,8 @@ def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
         if symbol: target_y = y + (symbol.height - logotxt.height) // 2
         bg_img.paste(txt_to_paste, (next_x, target_y), txt_to_paste)
         next_x += logotxt.width
-        logo_height = max(logo_height, logotxt.height)
         
-    return next_x, logo_height
+    return next_x, use_white
 
 def draw_rounded_box(draw, xy, radius, fill):
     draw.rounded_rectangle(xy, radius=radius, fill=fill)
@@ -332,9 +328,8 @@ def draw_rounded_box(draw, xy, radius, fill):
 # ==============================================================================
 # [5] 메인 UI
 # ==============================================================================
-st.title("📰 One-Click News (v14.9 Natural Language Flow)")
+st.title("📰 One-Click News (v15.0 Semantic Balance)")
 
-# URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
 run_button = st.button("🚀 카드뉴스 제작")
 result_container = st.container()
@@ -345,19 +340,19 @@ with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기
     이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI(Gemini Pro)** 기술을 결합하여, 기사의 맥락을 완벽하게 이해하고 시각화하는 **'지능형 콘텐츠 파트너'**입니다.
 
     ### 🧠 1. Intelligence (맥락 인식 및 기획)
-    * **내러티브 구조화:** 기사를 'Hook(도입) - Content(전개) - Conclusion(결론)'의 8단 서사로 재구성.
-    * **맥락 기반 레이아웃 결정:** 문단 성격(인용, 데이터, 요약 등)에 따른 자동 디자인 매칭.
-    * **태그 자동 감지:** [단독], [심층] 등 태그 인식 및 뱃지 부착.
+    * **내러티브 구조화:** 기사를 'Hook - Content - Conclusion'의 8단 서사 구조로 재구성.
+    * **맥락 기반 레이아웃:** 인용문, 데이터, 요약 등 문단 성격에 따른 디자인 자동 매칭.
+    * **태그 자동 감지:** [단독], [심층] 등 인식 후 전용 뱃지 부착.
 
     ### 🎨 2. Design Engine (미학적 완성도)
-    * **한국어 최적화 줄바꿈:** '조사'와 '어미', '문장부호'를 인식하여 사람이 읽기 편한 위치에서 줄을 바꿉니다. (예: "시간이 흐르며 / 달라진 평가")
-    * **내어쓰기(Hanging Indent):** 제목이 따옴표로 시작하면 둘째 줄을 첫 글자에 맞춰 정렬합니다.
-    * **스마트 디밍 & 카멜레온 로고:** 배경 밝기에 반응하는 자동 색상 보정.
+    * **황금비율 줄바꿈:** 단순 길이 구분이 아닌, 의미 단위와 시각적 균형(Balance)을 고려하여 최적의 위치에서 줄을 바꿉니다. (예: "시간이 증명한 / 고향의 자부심")
+    * **내어쓰기(Hanging Indent):** 제목이 따옴표로 시작하면 둘째 줄을 첫 글자에 맞춰 정렬.
+    * **스마트 디밍 & 카멜레온 로고:** 배경 밝기 자동 감지 및 텍스트/로고 색상 보정.
     
     ### 🛡️ 3. Core Tech
-    * **자동 자산 로드:** 로고/폰트 내장.
-    * **멀티 포맷:** 인스타 피드(1:1) / 스토리(9:16) 지원.
-    * **텍스트 정제:** 빈 괄호 삭제, 다중 공백 제거 등 디테일한 교정.
+    * **자동 자산 로드:** 로고/폰트 서버 내장.
+    * **멀티 포맷:** 1:1, 9:16 규격 지원.
+    * **텍스트 정제:** 빈 괄호 삭제, 다중 공백 제거, 마침표 띄어쓰기 등.
     """)
 
 # ==============================================================================
@@ -391,8 +386,8 @@ if run_button:
             4. **TYPE: BOX** (일반 서술)
             
             [필수 규칙]
-            1. **SLIDE 1 (COVER):** HEAD는 15자 이내 훅, DESC는 40자 이내.
-            2. **SLIDE 2~7 (CONTENT):** 각 장의 DESC(본문)는 **90자~110자(약 3줄)로 작성**. 넘치지 않게.
+            1. **SLIDE 1 (COVER):** HEAD는 15자 이내, DESC는 40자 이내.
+            2. **SLIDE 2~7 (CONTENT):** 각 장의 DESC(본문)는 **90자~110자(약 3줄)로 작성**.
             3. **SLIDE 8 (OUTRO):** 고정.
             4. 해시태그 5개 추천.
             
@@ -486,7 +481,6 @@ if run_button:
             for i, slide in enumerate(slides):
                 sType = slide.get('TYPE', 'BOX').upper()
                 
-                # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
                 else:
                     base = img_pool[i % len(img_pool)].copy().resize((CANVAS_W, CANVAS_H))
@@ -507,7 +501,7 @@ if run_button:
                     logo_height = 40 
                     
                     if img_sym or img_txt:
-                        next_x, logo_height = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
+                        next_x, _ = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
                         next_x += 25
                     else:
                         draw.text((60, top_y), "SEGYE BRIEFING", font=f_small, fill=color_main)
@@ -526,7 +520,6 @@ if run_button:
                 f_title = get_fitted_font(head, font_paths['title'], content_width)
 
                 if sType == 'COVER':
-                    # [FIX] 커버도 Semantic Wrap 적용
                     d_lines = wrap_text(desc, f_body, content_width)
                     curr_y = CANVAS_H - 150 - (len(d_lines)*60)
                     for l in d_lines:
@@ -535,6 +528,7 @@ if run_button:
                     curr_y -= (len(d_lines)*60 + 40)
                     draw.rectangle([(60, curr_y), (160, curr_y+10)], fill=color_main)
                     
+                    # [FIX] 의미 단위 & 균형 줄바꿈
                     h_lines = wrap_title_semantic(head, f_title, content_width)
                     
                     indent_x = 0
@@ -580,15 +574,13 @@ if run_button:
                     start_y = 250 if not is_story else 350
                     h_lines = wrap_title_semantic(head, f_title, content_width)
                     d_lines = wrap_text(desc, f_body, content_width)
+                    draw.rectangle([(80, start_y), (95, start_y + (len(h_lines)*110) + (len(d_lines)*65) + 60)], fill=color_main)
                     
-                    # 내어쓰기
                     indent_x = 0
                     if h_lines and h_lines[0].startswith(("'", '"', "“", "‘")):
                         try: indent_x = f_title.getlength(h_lines[0][0])
                         except: indent_x = 20
 
-                    draw.rectangle([(80, start_y), (95, start_y + (len(h_lines)*110) + (len(d_lines)*65) + 60)], fill=color_main)
-                    
                     for idx, l in enumerate(h_lines):
                         draw_x = 120
                         if idx > 0: draw_x += indent_x
@@ -607,6 +599,7 @@ if run_button:
                     brand = "세상을 보는 눈, 세계일보"
                     w2 = draw.textlength(brand, font=f_body)
                     draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=f_body, fill=out_c)
+                    
                     qr = generate_qr_code(url).resize((250, 250))
                     qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
                     img.paste(qr, (qx, qy), qr)
