@@ -14,42 +14,14 @@ import fitz
 import re
 
 # --- [1] 페이지 설정 ---
-st.set_page_config(page_title="One-Click News v14.5", page_icon="📰", layout="wide")
+st.set_page_config(page_title="One-Click News v14.6", page_icon="📰", layout="wide")
 
 # --- [2] 고정 자산 ---
 LOGO_SYMBOL_PATH = "segye_symbol.png"
 LOGO_TEXT_PATH = "segye_text.png"
 
 # ==============================================================================
-# [3] 사이드바 (가장 먼저 실행되어야 함)
-# ==============================================================================
-with st.sidebar:
-    st.header("⚙️ 설정")
-    # 여기서 api_key를 먼저 정의해야 함
-    api_key = st.text_input("Google API Key", type="password")
-    if api_key: genai.configure(api_key=api_key)
-    st.markdown("---")
-    
-    # 포맷 변수도 미리 정의
-    format_option = st.radio("사이즈:", ["카드뉴스 (1:1)", "인스타 스토리 (9:16)"])
-    if "9:16" in format_option:
-        CANVAS_W, CANVAS_H = 1080, 1920
-        is_story = True
-    else:
-        CANVAS_W, CANVAS_H = 1080, 1080
-        is_story = False
-        
-    st.markdown("---")
-    user_image = st.file_uploader("대표 이미지 (선택)", type=['png','jpg','jpeg'])
-    use_auto_color = st.checkbox("테마 색상 자동 추출", value=True)
-    
-    if os.path.exists(LOGO_SYMBOL_PATH): 
-        st.success("✅ 로고 시스템 준비됨")
-    else:
-        st.error("⚠️ 로고 파일 없음")
-
-# ==============================================================================
-# [4] 유틸리티 및 그리기 함수
+# [3] 유틸리티 및 그리기 함수
 # ==============================================================================
 
 def is_color_dark(hex_color):
@@ -62,11 +34,16 @@ def is_color_dark(hex_color):
 def clean_text_spacing(text):
     if not text: return ""
     text = text.strip()
-    text = re.sub(r'고\s*\(\s*\)', '고', text)
-    text = re.sub(r'\(\s*\)', '', text)
+    
+    # [FIX] 빈 괄호 및 다중 공백 강력 제거
+    text = re.sub(r'고\s*\([^)]*\)', '고', text) # 고(  ) -> 고
+    text = re.sub(r'\([^)]*\)', '', text) # 내용 없는 괄호 삭제 (빈칸 포함)
+    
+    # 마침표/쉼표 뒤 띄어쓰기 및 다중 공백 압축
     text = re.sub(r'(?<=[가-힣])\.(?=[가-힣a-zA-Z])', '. ', text)
     text = re.sub(r'(?<=[가-힣])\,(?=[가-힣a-zA-Z])', ', ', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s+', ' ', text) # 다중 공백 -> 단일 공백
+    
     return text.strip()
 
 def extract_tag_from_title(title):
@@ -214,11 +191,8 @@ def wrap_text(text, font, max_width, draw=None):
         words = para.split(' ')
         current_line = words[0]
         for word in words[1:]:
-            try:
-                line_width = font.getlength(current_line + " " + word)
-            except:
-                line_width = len(current_line + " " + word) * 30
-            
+            try: line_width = font.getlength(current_line + " " + word)
+            except: line_width = len(current_line + " " + word) * 30
             if line_width <= max_width:
                 current_line += " " + word
             else:
@@ -227,35 +201,63 @@ def wrap_text(text, font, max_width, draw=None):
         lines.append(current_line)
     return lines
 
-def wrap_text_semantic(text, font, max_width):
-    lines = wrap_text(text, font, max_width)
-    if len(lines) == 2:
-        full_text = lines[0] + " " + lines[1]
-        mid = len(full_text) // 2
-        words = full_text.split()
-        best_split = -1
-        min_diff = 999
-        josa = ['은','는','이','가','을','를','에','의','와','과','로']
+# [FIX] 자연스러운 줄바꿈 (외톨이 글자 방지 + 역피라미드)
+def wrap_title_natural(text, font, max_width):
+    text = clean_text_spacing(text)
+    try: length = font.getlength(text)
+    except: length = len(text) * 50
+    
+    # 한 줄 가능하면 바로 리턴
+    if length <= max_width: return [text]
+    
+    words = text.split()
+    if len(words) == 1: return [text] # 단어 하나면 그냥 둠
+    
+    # 2줄로 나눌 때 최적점 찾기
+    best_lines = []
+    best_score = -float('inf')
+    
+    # 모든 단어 사이를 컷 포인트로 테스트
+    for i in range(1, len(words)):
+        L1 = " ".join(words[:i])
+        L2 = " ".join(words[i:])
         
-        for i, w in enumerate(words):
-            if any(w.endswith(j) for j in josa):
-                diff = abs(i - (len(words)//2))
-                if diff < min_diff:
-                    min_diff = diff
-                    best_split = i
+        try: w1 = font.getlength(L1)
+        except: w1 = len(L1) * 50
+        try: w2 = font.getlength(L2)
+        except: w2 = len(L2) * 50
         
-        if best_split != -1 and best_split < len(words)-1:
-             return [" ".join(words[:best_split+1]), " ".join(words[best_split+1:])]
-             
-    return lines
+        # 폭 넘어가면 탈락
+        if w1 > max_width or w2 > max_width: continue
+        
+        score = 0
+        # 1. 2번째 줄이 너무 짧으면(외톨이) 감점 (최소 3글자 이상 권장)
+        if len(L2) < 3: score -= 50
+        
+        # 2. 역피라미드 선호 (2번째 줄이 1번째 줄보다 길거나 비슷)
+        if w2 >= w1 * 0.8: score += 20
+        
+        # 3. 조사 끊기 선호
+        last_word_L1 = words[i-1]
+        josa = ['은','는','이','가','을','를','에','의','와','과','로','도','만']
+        if any(last_word_L1.endswith(j) for j in josa): score += 30
+        
+        if score > best_score:
+            best_score = score
+            best_lines = [L1, L2]
+            
+    if best_lines: return best_lines
+    
+    # 실패하면 그냥 일반 wrap
+    return wrap_text(text, font, max_width)
 
-def get_fitted_font(text, font_path, max_width, max_size=95, min_size=60):
+def get_fitted_font(text, font_path, max_width, max_size=95, min_size=55):
     size = max_size
     while size >= min_size:
         font = ImageFont.truetype(font_path, size)
         try: length = font.getlength(text)
         except: length = len(text) * size 
-        if length / 2 < max_width: return font
+        if length / 2 < max_width * 1.1: return font # 여유 조금 둠
         size -= 5
     return ImageFont.truetype(font_path, min_size)
 
@@ -265,45 +267,60 @@ def generate_qr_code(link):
     qr.make(fit=True)
     return qr.make_image(fill_color="black", back_color="white").convert("RGBA")
 
+# [FIX] 로고 실제 영역(BBox) 기준 정렬
 def paste_logo_smart(bg_img, symbol, logotxt, x=50, y=50):
     check_area = (x, y, x+300, y+100)
     brightness = check_brightness(bg_img, check_area)
     use_white = brightness < 100
     
     next_x = x
-    logo_height = 0
+    visual_center_y = y # 텍스트 로고의 시각적 중앙점
     
     if symbol:
         sym_to_paste = recolor_image_to_white(symbol) if use_white else symbol
         bg_img.paste(sym_to_paste, (x, y), sym_to_paste)
         next_x += symbol.width + 15
-        logo_height = max(logo_height, symbol.height)
     
     if logotxt:
         txt_to_paste = recolor_image_to_white(logotxt) if use_white else logotxt
+        # 심볼 중앙에 맞춤
         target_y = y
         if symbol: target_y = y + (symbol.height - logotxt.height) // 2
-        
         bg_img.paste(txt_to_paste, (next_x, target_y), txt_to_paste)
-        next_x += logotxt.width
-        logo_height = max(logo_height, logotxt.height)
         
-    return next_x, logo_height
+        # 텍스트 로고의 실제 콘텐츠 영역(BBox) 계산
+        bbox = txt_to_paste.getbbox()
+        if bbox:
+            # 실제 글자 높이의 중앙점 계산
+            actual_h = bbox[3] - bbox[1]
+            visual_center_y = target_y + bbox[1] + (actual_h // 2)
+        else:
+            visual_center_y = target_y + (logotxt.height // 2)
+            
+        next_x += logotxt.width
+        
+    return next_x, visual_center_y, use_white
 
 def draw_rounded_box(draw, xy, radius, fill):
     draw.rounded_rectangle(xy, radius=radius, fill=fill)
 
 # ==============================================================================
-# [5] 메인 UI (사이드바는 이미 위에서 처리됨)
+# [5] 메인 UI (사이드바는 위에서 처리)
 # ==============================================================================
-st.title("📰 One-Click News (v14.5 Emergency Fix)")
+st.title("📰 One-Click News (v14.6 The Masterpiece)")
 
+# 1. URL 입력
 url = st.text_input("기사 URL 입력", placeholder="https://www.segye.com/...")
+
+# 2. 실행 버튼
 run_button = st.button("🚀 카드뉴스 제작")
+
+# 3. 결과 컨테이너
 result_container = st.container()
 
+# 4. 상세 안내문 (풀버전 복구)
 st.markdown("---")
-with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Full Spec)", expanded=True):
+with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기능 명세 (Whitepaper)", expanded=True):
     st.markdown("""
     이 프로그램은 단순한 요약기가 아닙니다. **세계일보의 저널리즘 원칙**과 **최신 생성형 AI(Gemini Pro)** 기술을 결합하여, 기사의 맥락을 완벽하게 이해하고 시각화하는 **'지능형 콘텐츠 파트너'**입니다.
 
@@ -316,23 +333,22 @@ with st.expander("💡 [안내] 세계일보 AI 카드뉴스 생성 원리 & 기
     * **태그 자동 감지 (Smart Tagging):** 기사 제목의 `[단독]`, `[심층기획]` 등을 자동으로 인식하여, 로고 옆에 **전용 뱃지**를 부착합니다.
 
     ### 🎨 2. Design Engine (미학적 완성도)
-    * **스마트 디밍 (Smart Dimming):** 배경 사진이 밝아도 흰색 글씨가 선명하게 보이도록, 이미지의 밝기를 자동으로 낮추고 텍스트에 **Deep Shadow & Stroke** 기술을 적용했습니다.
-    * **카멜레온 로고 (Adaptive Logo):** 배경이 어두우면 로고를 흰색으로, 밝으면 검은색으로 자동 변환하여 시인성을 확보합니다.
-    * **안전형 레이아웃 (Safe Layout):** 텍스트가 카드 밖으로 잘리지 않도록 **Top-Down** 방식의 배치 로직과 넉넉한 여백(Padding)을 적용했습니다.
-    * **멀티 포맷 지원:** 하나의 기사로 **인스타그램 피드(1:1)**와 **스토리/릴스(9:16)** 규격을 자유롭게 오갈 수 있습니다.
+    * **내어쓰기(Hanging Indent):** 제목이 따옴표로 시작할 경우, 둘째 줄을 첫 글자에 맞춰 정렬하여 가독성을 높입니다.
+    * **자연스러운 줄바꿈:** 의미 단위(조사)를 고려하여 제목을 끊고, 외톨이 글자(Orphan)를 방지합니다.
+    * **스마트 디밍 & 카멜레온 로고:** 배경 밝기에 따라 텍스트와 로고 색상/명암을 자동 조절합니다.
+    * **안전형 레이아웃:** 텍스트가 카드 밖으로 잘리지 않도록 **Top-Down** 방식의 배치 로직과 넉넉한 여백(Padding)을 적용했습니다.
 
     ### 🛡️ 3. Core Tech (안정성 및 편의성)
-    * **자동 자산 로드:** 로고와 전용 폰트를 서버에 내장하여, 매번 파일을 업로드하는 불편함을 없앴습니다.
-    * **멀티 이미지 스크래핑:** 기사 썸네일뿐만 아니라 본문의 모든 이미지를 수집하여, 슬라이드마다 다채로운 배경을 제공합니다.
-    * **Visual SEO:** 인스타그램 유입을 극대화하기 위해 기사 내용에 최적화된 **해시태그**를 자동 생성합니다.
-    * **타이포그래피 자동 교정:** 마침표 뒤 띄어쓰기 교정, 빈 괄호 삭제 등 디테일한 텍스트 정제 기능을 탑재했습니다.
+    * **자동 자산 로드:** 로고와 전용 폰트를 서버에 내장했습니다.
+    * **멀티 이미지 스크래핑:** 기사 본문의 다양한 이미지를 활용합니다.
+    * **Visual SEO:** 인스타그램 최적화 해시태그를 자동 생성합니다.
+    * **텍스트 정제:** 빈 괄호 `고( )` 삭제, 다중 공백 제거 등 디테일한 교정을 수행합니다.
     """)
 
 # ==============================================================================
 # [6] 실행 로직
 # ==============================================================================
 if run_button:
-    # api_key가 위에서 정의되었으므로 이제 안전하게 검사 가능
     if not api_key: st.error("API Key 필요"); st.stop()
     if not url: st.error("URL 필요"); st.stop()
     
@@ -455,6 +471,7 @@ if run_button:
             for i, slide in enumerate(slides):
                 sType = slide.get('TYPE', 'BOX').upper()
                 
+                # 배경
                 if sType == 'OUTRO': img = bg_outro.copy()
                 else:
                     base = img_pool[i % len(img_pool)].copy().resize((CANVAS_W, CANVAS_H))
@@ -468,26 +485,23 @@ if run_button:
 
                 draw = ImageDraw.Draw(img, 'RGBA')
                 
+                # 상단 로고 & 뱃지
                 top_y = 100 if is_story else 60
                 if sType != 'OUTRO':
                     next_x = 60
-                    logo_height = 40 
-                    
-                    if img_sym or img_txt:
-                        next_x, logo_height = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
-                        next_x += 25
-                    else:
-                        draw.text((60, top_y), "SEGYE BRIEFING", font=f_small, fill=color_main)
-                        next_x = 320
+                    # [FIX] 로고 BBox 기준 중앙점 받아오기
+                    next_x, visual_center_y, _ = paste_logo_smart(img, img_sym, img_txt, x=60, y=top_y)
+                    next_x += 25 
 
                     if news_tag:
                         badge_h = 47
-                        badge_y = top_y + (logo_height // 2) - (badge_h // 2)
-                        if img_sym: badge_y += 3 
+                        # [FIX] BBox 중앙점에 뱃지 중앙을 맞춤
+                        badge_y = visual_center_y - (badge_h // 2)
                         draw_pill_badge(draw, next_x, badge_y, news_tag, f_badge, bg_color="#C80000")
                     
                     draw_text_with_stroke(draw, (CANVAS_W-130, top_y), f"{i+1}/{len(slides)}", f_small)
 
+                # 내용 그리기
                 head = clean_text_spacing(slide.get('HEAD', ''))
                 desc = clean_text_spacing(slide.get('DESC', ''))
                 content_width = CANVAS_W - 200 
@@ -501,15 +515,20 @@ if run_button:
                         curr_y += 60
                     curr_y -= (len(d_lines)*60 + 40)
                     draw.rectangle([(60, curr_y), (160, curr_y+10)], fill=color_main)
-                    h_lines = wrap_text_semantic(head, f_title, content_width)
+                    
+                    # [FIX] 자연스러운 줄바꿈 적용
+                    h_lines = wrap_title_natural(head, f_title, content_width)
+                    
+                    # [FIX] 내어쓰기 (Hanging Indent) 계산
                     indent_x = 0
                     if h_lines and h_lines[0].startswith(("'", '"', "“", "‘")):
                         try: indent_x = f_title.getlength(h_lines[0][0])
                         except: indent_x = 20
+
                     curr_y -= (len(h_lines)*110 + 20)
                     for idx, l in enumerate(h_lines):
                         draw_x = 60
-                        if idx > 0: draw_x += indent_x
+                        if idx > 0: draw_x += indent_x # 들여쓰기
                         draw_text_with_stroke(draw, (draw_x, curr_y), l, f_title, stroke_width=3)
                         curr_y += 110
 
@@ -517,7 +536,7 @@ if run_button:
                     bbox = draw.textbbox((0,0), head, font=f_huge)
                     w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
                     draw_text_with_stroke(draw, ((CANVAS_W-w)//2, (CANVAS_H-h)//2 - 100), head, f_huge, fill=color_main, stroke_width=4)
-                    d_lines = wrap_text(desc, f_body, 800)
+                    d_lines = wrap_text(desc, f_body, 800, draw)
                     curr_y = (CANVAS_H//2) + 100
                     for l in d_lines:
                         lw = draw.textlength(l, font=f_body)
@@ -528,24 +547,34 @@ if run_button:
                     head = head.replace('"', '').replace("'", "")
                     start_y = 250 if not is_story else 350
                     draw.text((80, start_y - 120), "“", font=f_quote, fill=(255,255,255,70))
-                    h_lines = wrap_text_semantic(head, f_title, content_width)
+                    h_lines = wrap_title_natural(head, f_title, content_width)
                     for l in h_lines:
                         draw_text_with_stroke(draw, (150, start_y), l, f_title, stroke_width=3)
                         start_y += 110
                     draw.line((150, start_y+20, 350, start_y+20), fill=color_main, width=5)
                     start_y += 60
-                    d_lines = wrap_text(desc, f_body, content_width)
+                    d_lines = wrap_text(desc, f_body, content_width, draw)
                     for l in d_lines:
                         draw_text_with_stroke(draw, (150, start_y), l, f_body, stroke_width=2)
                         start_y += 65
 
                 elif sType == 'BAR':
                     start_y = 250 if not is_story else 350
-                    h_lines = wrap_text_semantic(head, f_title, content_width)
-                    d_lines = wrap_text(desc, f_body, content_width)
-                    draw.rectangle([(80, start_y), (95, start_y + (len(h_lines)*110) + (len(d_lines)*65) + 60)], fill=color_main)
-                    for l in h_lines:
-                        draw_text_with_stroke(draw, (120, start_y), l, f_title, stroke_width=3)
+                    h_lines = wrap_title_natural(head, f_title, content_width)
+                    d_lines = wrap_text(desc, f_body, content_width, draw)
+                    total_h = (len(h_lines)*110) + (len(d_lines)*65) + 60
+                    draw.rectangle([(80, start_y), (95, start_y + total_h)], fill=color_main)
+                    
+                    # 내어쓰기
+                    indent_x = 0
+                    if h_lines and h_lines[0].startswith(("'", '"', "“", "‘")):
+                        try: indent_x = f_title.getlength(h_lines[0][0])
+                        except: indent_x = 20
+
+                    for idx, l in enumerate(h_lines):
+                        draw_x = 120
+                        if idx > 0: draw_x += indent_x
+                        draw_text_with_stroke(draw, (draw_x, start_y), l, f_title, stroke_width=3)
                         start_y += 110
                     start_y += 30
                     for l in d_lines:
@@ -560,23 +589,36 @@ if run_button:
                     brand = "세상을 보는 눈, 세계일보"
                     w2 = draw.textlength(brand, font=f_body)
                     draw.text(((CANVAS_W-w2)/2, CANVAS_H//3 + 130), brand, font=f_body, fill=out_c)
+                    
+                    # [FIX] QR 코드 배경 없음 (투명)
                     qr = generate_qr_code(url).resize((250, 250))
                     qx, qy = (CANVAS_W-250)//2, CANVAS_H//3 + 300
                     img.paste(qr, (qx, qy), qr)
+                    
                     msg = "기사 원문 보러가기"
                     w3 = draw.textlength(msg, font=f_small)
                     draw.text(((CANVAS_W-w3)/2, qy + 270), msg, font=f_small, fill=out_c)
 
                 else: # BOX
                     start_y = 250 if not is_story else 350
-                    h_lines = wrap_text_semantic(head, f_title, content_width)
-                    d_lines = wrap_text(desc, f_body, content_width)
+                    h_lines = wrap_title_natural(head, f_title, content_width)
+                    d_lines = wrap_text(desc, f_body, content_width, draw)
+                    
                     box_h = (len(h_lines)*110) + (len(d_lines)*65) + 120
                     box_start_y = max(start_y, (CANVAS_H - box_h) // 2)
                     draw_rounded_box(draw, (80, box_start_y, CANVAS_W-80, box_start_y + box_h), 30, (0,0,0,160))
                     txt_y = box_start_y + 50
-                    for l in h_lines:
-                        draw_text_with_stroke(draw, (120, txt_y), l, f_title, fill=color_main, stroke_width=0)
+                    
+                    # 내어쓰기
+                    indent_x = 0
+                    if h_lines and h_lines[0].startswith(("'", '"', "“", "‘")):
+                        try: indent_x = f_title.getlength(h_lines[0][0])
+                        except: indent_x = 20
+
+                    for idx, l in enumerate(h_lines):
+                        draw_x = 120
+                        if idx > 0: draw_x += indent_x
+                        draw_text_with_stroke(draw, (draw_x, txt_y), l, f_title, fill=color_main, stroke_width=0)
                         txt_y += 110
                     draw.line((120, txt_y+10, 320, txt_y+10), fill=color_main, width=5)
                     txt_y += 40
